@@ -898,6 +898,56 @@ fn test_offer_guard_mint_missing_witness_rejected() {
 }
 
 #[test]
+fn test_offer_guard_mint_malformed_witness_length_rejected() {
+    let verifier = Signer::random();
+    let recipient_hash = [11u8; 32];
+
+    let mut context = Context::default();
+    let out_point = context.deploy_cell_by_name("offer-guard");
+    let out_point_always_success = context.deploy_cell(ckb_testtool::builtin::ALWAYS_SUCCESS.clone());
+    let funding_lock = context
+        .build_script(&out_point_always_success, Default::default())
+        .expect("script");
+    let funding_out_point = context.create_cell(
+        CellOutput::new_builder()
+            .capacity(200_000_000_000u64)
+            .lock(funding_lock.clone())
+            .build(),
+        Bytes::new(),
+    );
+    let funding_input = CellInput::new_builder().previous_output(funding_out_point).build();
+
+    let mut guard_args = Vec::with_capacity(52);
+    guard_args.extend_from_slice(&verifier.address());
+    guard_args.extend_from_slice(&recipient_hash);
+    let guard_type_script = context.build_script(&out_point, Bytes::from(guard_args)).expect("script");
+    let guard_output = CellOutput::new_builder()
+        .capacity(200_000_000_000u64)
+        .lock(funding_lock)
+        .type_(Some(guard_type_script).pack())
+        .build();
+
+    let witness_args = WitnessArgs::new_builder()
+        .lock(Some(Bytes::from(vec![0u8; 10])).pack()) // way too short
+        .build();
+
+    let cell_deps = vec![
+        CellDep::new_builder().out_point(out_point).build(),
+        CellDep::new_builder().out_point(out_point_always_success).build(),
+    ];
+    let tx = TransactionBuilder::default()
+        .input(funding_input)
+        .output(guard_output)
+        .outputs_data(vec![Bytes::new()].pack())
+        .witness(witness_args.as_bytes().pack())
+        .cell_deps(cell_deps)
+        .build();
+    let tx = context.complete_tx(tx);
+    let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
+    assert_script_error(err, 7); // ERROR_OWNERSHIP_WITNESS_LEN
+}
+
+#[test]
 fn test_offer_guard_mint_rejects_a_payment_claim_signature_reused_as_ownership_proof() {
     // Domain separation: a signature the Verifier produced for a genuine
     // payment CLAIM message (72 bytes: tx_id_hash || recipient_hash ||
@@ -1050,6 +1100,111 @@ fn test_claim_without_offer_guard_attached_rejected() {
     let tx = context.complete_tx(tx);
     let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
     assert_script_error(err, 17); // ERROR_OFFER_GUARD_MISSING
+}
+
+#[test]
+fn test_claim_with_wrong_offer_guard_type_hash_rejected() {
+    // A stronger version of the "missing" case above: the escrow cell DOES
+    // carry a real, validly-minted OfferGuard Type Script -- just not the
+    // ONE its own args actually name. Naming the right hash in args isn't
+    // enough, and neither is carrying *some* real badge -- it has to be
+    // the SAME one.
+    let signer = Signer::random();
+    let recipient_hash = [7u8; 32];
+    let tx_id_hash = [9u8; 32];
+    let amount: i64 = 25_000;
+
+    let message = claim_message(&tx_id_hash, &recipient_hash, amount);
+    let signature = signer.sign(&message);
+    let witness = build_witness(&tx_id_hash, &recipient_hash, amount, &signature);
+
+    let mut context = Context::default();
+    let (registry_out_point, _, registry_cell, _) = mint_registry(&mut context);
+    // The guard hash actually named in the escrow's own args:
+    let (_expected_guard_out_point, expected_guard_type_script) =
+        mint_offer_guard(&mut context, &signer, &recipient_hash);
+    // A DIFFERENT, but equally real and validly-minted, guard -- for an
+    // unrelated recipient_hash -- is what gets attached to the escrow cell
+    // instead.
+    let unrelated_recipient_hash = [77u8; 32];
+    let (wrong_guard_out_point, wrong_guard_type_script) =
+        mint_offer_guard(&mut context, &signer, &unrelated_recipient_hash);
+    let buyer_lock = claimant_lock(&mut context, 1);
+    let buyer_lock_hash: [u8; 32] = buyer_lock.calc_script_hash().unpack();
+
+    let escrow_out_point = context.deploy_cell_by_name("mpesa-escrow");
+    let registry_type_hash: [u8; 32] = registry_cell
+        .type_()
+        .to_opt()
+        .expect("registry cell must carry a type script")
+        .calc_script_hash()
+        .unpack();
+    let expected_guard_type_hash: [u8; 32] = expected_guard_type_script.calc_script_hash().unpack();
+    let args = build_args(
+        &signer.address(),
+        &recipient_hash,
+        amount,
+        &registry_type_hash,
+        &expected_guard_type_hash,
+    );
+    let lock_script = context.build_script(&escrow_out_point, args).expect("script");
+
+    // Attach the WRONG (but real) guard here, not the one named in args.
+    let escrow_input_out_point = context.create_cell(
+        CellOutput::new_builder()
+            .capacity(100_000_000_000u64)
+            .lock(lock_script.clone())
+            .type_(Some(wrong_guard_type_script).pack())
+            .build(),
+        Bytes::from(buyer_lock_hash.to_vec()),
+    );
+    let escrow_input = CellInput::new_builder().previous_output(escrow_input_out_point).build();
+    let escrow_payout_output = CellOutput::new_builder()
+        .capacity(100_000_000_000u64)
+        .lock(buyer_lock.clone())
+        .build();
+
+    let claimant_funding_out_point = context.create_cell(
+        CellOutput::new_builder()
+            .capacity(50_000_000_000u64)
+            .lock(buyer_lock.clone())
+            .build(),
+        Bytes::new(),
+    );
+    let claimant_input = CellInput::new_builder().previous_output(claimant_funding_out_point).build();
+    let claimant_change_output = CellOutput::new_builder()
+        .capacity(50_000_000_000u64)
+        .lock(buyer_lock)
+        .build();
+
+    let registry_input_out_point = context.create_cell(registry_cell.clone(), Bytes::new());
+    let registry_input = CellInput::new_builder().previous_output(registry_input_out_point).build();
+    let new_registry_data = tx_id_hash.to_vec();
+
+    let escrow_witness_args = WitnessArgs::new_builder().lock(Some(witness).pack()).build();
+    let empty_witness_args = WitnessArgs::default();
+
+    let cell_deps = vec![
+        CellDep::new_builder().out_point(escrow_out_point).build(),
+        CellDep::new_builder().out_point(registry_out_point).build(),
+        CellDep::new_builder().out_point(wrong_guard_out_point).build(),
+    ];
+    let tx = TransactionBuilder::default()
+        .input(escrow_input)
+        .input(claimant_input)
+        .input(registry_input)
+        .output(escrow_payout_output)
+        .output(claimant_change_output)
+        .output(registry_cell)
+        .outputs_data(vec![Bytes::new(), Bytes::new(), Bytes::from(new_registry_data)].pack())
+        .witness(escrow_witness_args.as_bytes().pack())
+        .witness(empty_witness_args.clone().as_bytes().pack())
+        .witness(empty_witness_args.as_bytes().pack())
+        .cell_deps(cell_deps)
+        .build();
+    let tx = context.complete_tx(tx);
+    let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
+    assert_script_error(err, 17); // ERROR_OFFER_GUARD_MISSING (hash mismatch, not absence)
 }
 
 /// Derives a Type ID mint value the exact same way ckb_std::type_id::check_type_id
@@ -1244,4 +1399,44 @@ fn test_offer_guard_transfer_preserves_badge_without_re_checking() {
         .build();
     let tx = context.complete_tx(tx);
     context.verify_tx(&tx, MAX_CYCLES).expect("transfer without re-proof should pass");
+}
+
+#[test]
+fn test_offer_guard_rejects_unsupported_group_shape() {
+    // (1, 2): one live OfferGuard cell split into two outputs both
+    // carrying the exact same type script hash. Not MINT (0,1), not
+    // TRANSFER (1,1), not BURN (1,0) -- must be rejected outright rather
+    // than silently falling through to an allowed case.
+    let verifier = Signer::random();
+    let recipient_hash = [11u8; 32];
+
+    let mut context = Context::default();
+    let (guard_out_point, guard_type_script) = mint_offer_guard(&mut context, &verifier, &recipient_hash);
+    let out_point_always_success = context.deploy_cell(ckb_testtool::builtin::ALWAYS_SUCCESS.clone());
+    let lock = context
+        .build_script(&out_point_always_success, Default::default())
+        .expect("script");
+
+    let guard_cell = CellOutput::new_builder()
+        .capacity(200_000_000_000u64)
+        .lock(lock.clone())
+        .type_(Some(guard_type_script).pack())
+        .build();
+    let guard_input_out_point = context.create_cell(guard_cell.clone(), Bytes::new());
+    let guard_input = CellInput::new_builder().previous_output(guard_input_out_point).build();
+
+    let cell_deps = vec![
+        CellDep::new_builder().out_point(guard_out_point).build(),
+        CellDep::new_builder().out_point(out_point_always_success).build(),
+    ];
+    let tx = TransactionBuilder::default()
+        .input(guard_input)
+        .output(guard_cell.clone())
+        .output(guard_cell)
+        .outputs_data(vec![Bytes::new(), Bytes::new()].pack())
+        .cell_deps(cell_deps)
+        .build();
+    let tx = context.complete_tx(tx);
+    let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
+    assert_script_error(err, 5); // ERROR_UNSUPPORTED_STRUCTURE
 }
