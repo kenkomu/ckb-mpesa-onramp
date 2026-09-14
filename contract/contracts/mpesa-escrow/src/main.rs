@@ -17,15 +17,6 @@ ckb_std::default_alloc!(16384, 1258306, 64);
 
 // MpesaEscrow -- Bitshada's trustless M-Pesa<->CKB escrow Lock Script.
 //
-// This is the first, incremental slice of the six-check design in the Bitshada
-// plan: attestor signature verification (check 2) and claim-field matching
-// (check 3). Nullifier/replay protection, the reservation check, the
-// seller-ownership check, and the deadline check are deliberately not here yet
-// -- this slice exists to de-risk the genuinely novel part (recoverable
-// secp256k1 signature verification in a no_std RISC-V script) before adding the
-// remaining checks, which are all more standard CKB patterns with direct
-// precedent elsewhere in this project.
-//
 // Trust model (explicit, not hidden): this script trusts exactly one
 // Ethereum-style address, embedded in its own lock args, to have signed the
 // claim. That address belongs to Ken's own TLSNotary Verifier -- the same
@@ -39,12 +30,15 @@ ckb_std::default_alloc!(16384, 1258306, 64);
 // (crates/attestation/src/signing.rs) -- secp256k1 with Keccak-256 hashing,
 // a recoverable `r || s || v` signature matching Solidity's ecrecover().
 //
-// Lock args (92 bytes, set once at cell-creation time by the seller):
-//   witness_address:   [u8; 20]  -- the trusted Verifier's Ethereum-style address
-//   recipient_hash:    [u8; 32]  -- hash(seller's M-Pesa number)
-//   amount:            u64 LE    -- the exact KES amount (minor units) expected
-//   registry_type_hash: [u8; 32] -- calc_script_hash() of the live ClaimsRegistry
-//                                   cell's type script this deployment trusts
+// Lock args (124 bytes, set once at cell-creation time by the seller):
+//   witness_address:     [u8; 20]  -- the trusted Verifier's Ethereum-style address
+//   recipient_hash:      [u8; 32]  -- hash(seller's M-Pesa number)
+//   amount:               u64 LE   -- the exact KES amount (minor units) expected
+//   registry_type_hash:  [u8; 32]  -- calc_script_hash() of the live ClaimsRegistry
+//                                     cell's type script this deployment trusts
+//   offer_guard_type_hash: [u8; 32] -- calc_script_hash() of the OfferGuard Type
+//                                     Script this deployment trusts to have
+//                                     checked seller-ownership at mint time
 //
 // Witness (WitnessArgs.lock field, 137 bytes, provided by the buyer to unlock):
 //   tx_id_hash:        [u8; 32]  -- hash of the real M-Pesa transaction ID
@@ -88,6 +82,24 @@ ckb_std::default_alloc!(16384, 1258306, 64);
 // both need CKB's `since` timelock mechanism, out of scope for this
 // increment. Right now a reservation, once made, is permanent until
 // claimed; that's an honest, named MVP gap, not a hidden one.
+//
+// Check 5 (seller-ownership, enforced at MINT, cross-checked here at
+// CLAIM): a Lock Script only ever executes when its cell is being SPENT --
+// never when it's merely being created as an output -- so this script
+// itself has no way to inspect or constrain how its own escrow cell was
+// created. Seller-ownership is instead enforced by a separate Type Script,
+// `contracts/offer-guard` (which DOES run on both sides of a transaction),
+// attached to the escrow cell at mint time: it requires an ownership
+// signature there before allowing the cell to exist at all, then allows it
+// to persist across transfers unchanged (mint/transfer pattern, same shape
+// as claims-registry). This script's own job is just to make sure the
+// escrow cell it's about to release actually carries that Type Script: the
+// CLAIM path checks `load_cell_type_hash(0, GroupInput) ==
+// Some(offer_guard_type_hash)`. Since OfferGuard's own transfer rule can't
+// change a live cell's recipient_hash/witness_address (Type Script groups
+// are keyed by the exact script hash, args included), any escrow cell
+// still carrying this type hash necessarily traces back to a mint
+// OfferGuard approved.
 
 use alloc::vec::Vec;
 
@@ -100,7 +112,7 @@ use ckb_std::high_level::{
 use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 use sha3::{Digest, Keccak256};
 
-const ARGS_LEN: usize = 92;
+const ARGS_LEN: usize = 124;
 const WITNESS_LEN: usize = 137;
 const CLAIM_MSG_LEN: usize = 72; // tx_id_hash(32) + recipient_hash(32) + amount(8)
 const HASH_LEN: usize = 32;
@@ -119,6 +131,7 @@ const ERROR_REGISTRY_NOT_REGISTERING_THIS_CLAIM: i8 = 13;
 const ERROR_CELL_DATA_MISSING: i8 = 14;
 const ERROR_UNSUPPORTED_STRUCTURE: i8 = 15;
 const ERROR_NOT_RESERVED_BY_CLAIMANT: i8 = 16;
+const ERROR_OFFER_GUARD_MISSING: i8 = 17;
 
 pub fn program_entry() -> i8 {
     let script = match load_script() {
@@ -133,6 +146,7 @@ pub fn program_entry() -> i8 {
     let expected_recipient_hash = &args[20..52];
     let expected_amount = i64::from_le_bytes(args[52..60].try_into().unwrap());
     let expected_registry_type_hash = &args[60..92];
+    let expected_offer_guard_type_hash: [u8; 32] = args[92..124].try_into().unwrap();
 
     let input_data = match load_cell_data(0, Source::GroupInput) {
         Ok(data) => data,
@@ -168,7 +182,19 @@ pub fn program_entry() -> i8 {
     }
     let reserved_by_lock_hash = &input_data[..];
 
-    let witness_args = match load_witness_args(0, ckb_std::ckb_constants::Source::GroupInput) {
+    // Check 5 (cross-check): the escrow cell actually being spent must
+    // carry the trusted OfferGuard Type Script -- see the module doc
+    // comment for why this is checked here rather than at mint.
+    let offer_guard_present = load_cell_type_hash(0, Source::GroupInput)
+        .ok()
+        .flatten()
+        .map(|hash| hash == expected_offer_guard_type_hash)
+        .unwrap_or(false);
+    if !offer_guard_present {
+        return ERROR_OFFER_GUARD_MISSING;
+    }
+
+    let witness_args = match load_witness_args(0, Source::GroupInput) {
         Ok(witness_args) => witness_args,
         Err(_) => return ERROR_WITNESS_MISSING,
     };
