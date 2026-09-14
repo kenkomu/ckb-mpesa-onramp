@@ -109,6 +109,17 @@ fn build_witness(
 /// exercise the nullifier-mismatch/missing-update paths pass a
 /// `registering_hash` different from (or absent from) the claim's own
 /// `tx_id_hash` inside `witness_lock`.
+///
+/// The escrow input cell carries `reserved_by_lock_hash` (32 bytes) as its
+/// reservation state -- check 4 -- and a THIRD input, locked by
+/// `claimant_lock`, is added to the transaction. When `reserved_by_lock_hash`
+/// equals `claimant_lock`'s own hash (the normal, honest case), that lock
+/// hash is actually present among the tx's other inputs, satisfying the
+/// "claimant is the party who reserved it" check; tests that want to prove
+/// the check actually bites pass a `reserved_by_lock_hash` that does NOT
+/// match `claimant_lock`. The escrowed capacity is sent to `claimant_lock`
+/// in the output (no GroupOutput cell at all), matching how a real claim
+/// actually moves funds.
 #[allow(clippy::too_many_arguments)]
 fn build_escrow_claim_tx(
     context: &mut Context,
@@ -120,6 +131,40 @@ fn build_escrow_claim_tx(
     registry_current_data: &[u8],
     registering_hash: Option<&[u8; 32]>,
     witness_lock: Bytes,
+    claimant_lock: &Script,
+) -> TransactionView {
+    let claimant_lock_hash: [u8; 32] = claimant_lock.calc_script_hash().unpack();
+    build_escrow_claim_tx_with_reservation(
+        context,
+        witness_address,
+        recipient_hash,
+        amount,
+        registry_out_point,
+        registry_cell,
+        registry_current_data,
+        registering_hash,
+        witness_lock,
+        claimant_lock,
+        &claimant_lock_hash,
+    )
+}
+
+/// Same as `build_escrow_claim_tx`, but lets the reservation hash stored on
+/// the escrow cell be set independently of `claimant_lock`'s real hash --
+/// needed to prove `ERROR_NOT_RESERVED_BY_CLAIMANT` actually fires.
+#[allow(clippy::too_many_arguments)]
+fn build_escrow_claim_tx_with_reservation(
+    context: &mut Context,
+    witness_address: &[u8; 20],
+    recipient_hash: &[u8; 32],
+    amount: i64,
+    registry_out_point: &OutPoint,
+    registry_cell: &CellOutput,
+    registry_current_data: &[u8],
+    registering_hash: Option<&[u8; 32]>,
+    witness_lock: Bytes,
+    claimant_lock: &Script,
+    reserved_by_lock_hash: &[u8; 32],
 ) -> TransactionView {
     let out_point = context.deploy_cell_by_name("mpesa-escrow");
     let registry_type_hash: [u8; 32] = registry_cell
@@ -136,14 +181,31 @@ fn build_escrow_claim_tx(
             .capacity(100_000_000_000u64)
             .lock(lock_script.clone())
             .build(),
-        Bytes::new(),
+        Bytes::from(reserved_by_lock_hash.to_vec()),
     );
     let escrow_input = CellInput::new_builder()
         .previous_output(escrow_input_out_point)
         .build();
-    let escrow_output = CellOutput::new_builder()
+    let escrow_payout_output = CellOutput::new_builder()
         .capacity(100_000_000_000u64)
-        .lock(lock_script)
+        .lock(claimant_lock.clone())
+        .build();
+
+    // The claimant's own funding input -- its presence, locked by
+    // `claimant_lock`, is what the contract checks against the reservation.
+    let claimant_funding_out_point = context.create_cell(
+        CellOutput::new_builder()
+            .capacity(50_000_000_000u64)
+            .lock(claimant_lock.clone())
+            .build(),
+        Bytes::new(),
+    );
+    let claimant_input = CellInput::new_builder()
+        .previous_output(claimant_funding_out_point)
+        .build();
+    let claimant_change_output = CellOutput::new_builder()
+        .capacity(50_000_000_000u64)
+        .lock(claimant_lock.clone())
         .build();
 
     let registry_input_out_point =
@@ -167,15 +229,29 @@ fn build_escrow_claim_tx(
     ];
     let tx = TransactionBuilder::default()
         .input(escrow_input)
+        .input(claimant_input)
         .input(registry_input)
-        .output(escrow_output)
+        .output(escrow_payout_output)
+        .output(claimant_change_output)
         .output(registry_cell.clone())
-        .outputs_data(vec![Bytes::new(), Bytes::from(new_registry_data)].pack())
+        .outputs_data(vec![Bytes::new(), Bytes::new(), Bytes::from(new_registry_data)].pack())
         .witness(escrow_witness_args.as_bytes().pack())
+        .witness(empty_witness_args.clone().as_bytes().pack())
         .witness(empty_witness_args.as_bytes().pack())
         .cell_deps(cell_deps)
         .build();
     context.complete_tx(tx)
+}
+
+/// Deploys ALWAYS_SUCCESS as a stand-in "claimant" lock script -- the
+/// buyer's own wallet lock, in a real transaction. Distinct calls with
+/// distinct `salt` args produce distinct lock hashes, so tests can tell an
+/// authorized claimant apart from an unrelated third party.
+fn claimant_lock(context: &mut Context, salt: u8) -> Script {
+    let out_point = context.deploy_cell(ckb_testtool::builtin::ALWAYS_SUCCESS.clone());
+    context
+        .build_script(&out_point, Bytes::from(vec![salt]))
+        .expect("script")
 }
 
 #[test]
@@ -191,6 +267,7 @@ fn test_happy_path_valid_claim_unlocks_and_registers_nullifier() {
 
     let mut context = Context::default();
     let (registry_out_point, _, registry_cell, _) = mint_registry(&mut context);
+    let buyer_lock = claimant_lock(&mut context, 1);
     let tx = build_escrow_claim_tx(
         &mut context,
         &signer.address(),
@@ -201,6 +278,7 @@ fn test_happy_path_valid_claim_unlocks_and_registers_nullifier() {
         &[], // registry starts empty
         Some(&tx_id_hash),
         witness,
+        &buyer_lock,
     );
     context.verify_tx(&tx, MAX_CYCLES).expect("pass verification");
 }
@@ -220,6 +298,7 @@ fn test_wrong_signer_rejected() {
 
     let mut context = Context::default();
     let (registry_out_point, _, registry_cell, _) = mint_registry(&mut context);
+    let buyer_lock = claimant_lock(&mut context, 1);
     let tx = build_escrow_claim_tx(
         &mut context,
         &trusted_signer.address(),
@@ -230,6 +309,7 @@ fn test_wrong_signer_rejected() {
         &[],
         Some(&tx_id_hash),
         witness,
+        &buyer_lock,
     );
     let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
     assert_script_error(err, 9); // ERROR_WITNESS_ADDRESS_MISMATCH
@@ -253,6 +333,7 @@ fn test_tampered_amount_rejected() {
 
     let mut context = Context::default();
     let (registry_out_point, _, registry_cell, _) = mint_registry(&mut context);
+    let buyer_lock = claimant_lock(&mut context, 1);
     let tx = build_escrow_claim_tx(
         &mut context,
         &signer.address(),
@@ -263,6 +344,7 @@ fn test_tampered_amount_rejected() {
         &[],
         Some(&tx_id_hash),
         witness,
+        &buyer_lock,
     );
     let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
     assert_script_error(err, 9); // recovers to a different address than expected
@@ -283,6 +365,7 @@ fn test_wrong_recipient_rejected() {
 
     let mut context = Context::default();
     let (registry_out_point, _, registry_cell, _) = mint_registry(&mut context);
+    let buyer_lock = claimant_lock(&mut context, 1);
     let tx = build_escrow_claim_tx(
         &mut context,
         &signer.address(),
@@ -293,6 +376,7 @@ fn test_wrong_recipient_rejected() {
         &[],
         Some(&tx_id_hash),
         witness,
+        &buyer_lock,
     );
     let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
     assert_script_error(err, 10); // ERROR_RECIPIENT_MISMATCH
@@ -308,6 +392,7 @@ fn test_malformed_witness_length_rejected() {
 
     let mut context = Context::default();
     let (registry_out_point, _, registry_cell, _) = mint_registry(&mut context);
+    let buyer_lock = claimant_lock(&mut context, 1);
     let tx = build_escrow_claim_tx(
         &mut context,
         &signer.address(),
@@ -318,6 +403,7 @@ fn test_malformed_witness_length_rejected() {
         &[],
         Some(&tx_id_hash),
         witness,
+        &buyer_lock,
     );
     let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
     assert_script_error(err, 6); // ERROR_WITNESS_LEN
@@ -339,6 +425,7 @@ fn test_claim_not_registered_in_this_tx_rejected() {
 
     let mut context = Context::default();
     let (registry_out_point, _, registry_cell, _) = mint_registry(&mut context);
+    let buyer_lock = claimant_lock(&mut context, 1);
     let tx = build_escrow_claim_tx(
         &mut context,
         &signer.address(),
@@ -349,6 +436,7 @@ fn test_claim_not_registered_in_this_tx_rejected() {
         &[],
         None, // registry is spent-and-recreated but nothing is appended
         witness,
+        &buyer_lock,
     );
     let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
     assert_script_error(err, 12); // ERROR_REGISTRY_NOT_FOUND (registry rejects the malformed update itself, so the escrow's own check never even gets the chance to fire independently -- but either way this transaction must fail)
@@ -371,6 +459,7 @@ fn test_registering_a_different_claim_rejected() {
 
     let mut context = Context::default();
     let (registry_out_point, _, registry_cell, _) = mint_registry(&mut context);
+    let buyer_lock = claimant_lock(&mut context, 1);
     let tx = build_escrow_claim_tx(
         &mut context,
         &signer.address(),
@@ -381,6 +470,7 @@ fn test_registering_a_different_claim_rejected() {
         &[],
         Some(&unrelated_tx_id_hash), // registers a different claim entirely
         witness,
+        &buyer_lock,
     );
     let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
     assert_script_error(err, 13); // ERROR_REGISTRY_NOT_REGISTERING_THIS_CLAIM
@@ -404,6 +494,7 @@ fn test_replaying_same_claim_across_transactions_rejected() {
 
     let mut context = Context::default();
     let (registry_out_point, registry_type_script, registry_cell, _) = mint_registry(&mut context);
+    let buyer_lock = claimant_lock(&mut context, 1);
 
     let first_tx = build_escrow_claim_tx(
         &mut context,
@@ -415,6 +506,7 @@ fn test_replaying_same_claim_across_transactions_rejected() {
         &[],
         Some(&tx_id_hash),
         witness.clone(),
+        &buyer_lock,
     );
     context.verify_tx(&first_tx, MAX_CYCLES).expect("first claim should pass");
 
@@ -433,9 +525,133 @@ fn test_replaying_same_claim_across_transactions_rejected() {
         &updated_registry_data,
         Some(&tx_id_hash), // replaying the exact same claim
         witness,
+        &buyer_lock,
     );
     let err = context.verify_tx(&second_tx, MAX_CYCLES).unwrap_err();
     assert_script_error(err, 8); // ERROR_DUPLICATE_CLAIM, from claims-registry itself
+}
+
+// ============================================================================
+// Reservation (check 4) -- the ghosting-prevention half only. See the
+// module doc comment in mpesa-escrow/src/main.rs for what's deliberately
+// NOT covered (expiry/reopen, which needs `since` timelocks).
+// ============================================================================
+
+/// Builds a RESERVE transaction: an open escrow cell (empty data) becomes
+/// reserved (32-byte lock-hash data), same lock script both sides, no
+/// witness needed -- reservation is deliberately unauthorized.
+fn build_reserve_tx(context: &mut Context, reserved_by_lock_hash: &[u8; 32]) -> TransactionView {
+    let out_point = context.deploy_cell_by_name("mpesa-escrow");
+    let registry_type_hash = [0u8; 32]; // irrelevant to the RESERVE path
+    let args = build_args(&[0u8; 20], &[0u8; 32], 0, &registry_type_hash);
+    let lock_script = context.build_script(&out_point, args).expect("script");
+
+    let escrow_input_out_point = context.create_cell(
+        CellOutput::new_builder()
+            .capacity(100_000_000_000u64)
+            .lock(lock_script.clone())
+            .build(),
+        Bytes::new(), // open, unreserved
+    );
+    let escrow_input = CellInput::new_builder()
+        .previous_output(escrow_input_out_point)
+        .build();
+    let escrow_output = CellOutput::new_builder()
+        .capacity(100_000_000_000u64)
+        .lock(lock_script)
+        .build();
+
+    let cell_deps = vec![CellDep::new_builder().out_point(out_point).build()];
+    let tx = TransactionBuilder::default()
+        .input(escrow_input)
+        .output(escrow_output)
+        .outputs_data(vec![Bytes::from(reserved_by_lock_hash.to_vec())].pack())
+        .cell_deps(cell_deps)
+        .build();
+    context.complete_tx(tx)
+}
+
+#[test]
+fn test_reserve_transition_open_offer_to_reserved() {
+    // Anyone may reserve an open offer -- no signature or authorization
+    // needed for this transition, by design.
+    let mut context = Context::default();
+    let reserved_by_lock_hash = [3u8; 32];
+    let tx = build_reserve_tx(&mut context, &reserved_by_lock_hash);
+    context.verify_tx(&tx, MAX_CYCLES).expect("reserve should pass");
+}
+
+#[test]
+fn test_reserve_transition_rejects_malformed_output_data() {
+    // Output data isn't a well-formed 32-byte reservation -- neither a
+    // valid RESERVE nor a valid CLAIM (empty input rules out CLAIM).
+    let mut context = Context::default();
+    let out_point = context.deploy_cell_by_name("mpesa-escrow");
+    let registry_type_hash = [0u8; 32];
+    let args = build_args(&[0u8; 20], &[0u8; 32], 0, &registry_type_hash);
+    let lock_script = context.build_script(&out_point, args).expect("script");
+
+    let escrow_input_out_point = context.create_cell(
+        CellOutput::new_builder()
+            .capacity(100_000_000_000u64)
+            .lock(lock_script.clone())
+            .build(),
+        Bytes::new(),
+    );
+    let escrow_input = CellInput::new_builder()
+        .previous_output(escrow_input_out_point)
+        .build();
+    let escrow_output = CellOutput::new_builder()
+        .capacity(100_000_000_000u64)
+        .lock(lock_script)
+        .build();
+
+    let cell_deps = vec![CellDep::new_builder().out_point(out_point).build()];
+    let tx = TransactionBuilder::default()
+        .input(escrow_input)
+        .output(escrow_output)
+        .outputs_data(vec![Bytes::from(vec![1u8; 10])].pack()) // wrong length
+        .cell_deps(cell_deps)
+        .build();
+    let tx = context.complete_tx(tx);
+    let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
+    assert_script_error(err, 15); // ERROR_UNSUPPORTED_STRUCTURE
+}
+
+#[test]
+fn test_claim_by_non_reserving_party_rejected() {
+    // A valid signature, valid claim, valid nullifier registration -- but
+    // the escrow cell was reserved by someone else's lock hash, and none of
+    // this transaction's other inputs are locked by that hash. A different
+    // buyer racing in with a technically-valid claim must still be rejected.
+    let signer = Signer::random();
+    let recipient_hash = [7u8; 32];
+    let tx_id_hash = [9u8; 32];
+    let amount: i64 = 25_000;
+
+    let message = claim_message(&tx_id_hash, &recipient_hash, amount);
+    let signature = signer.sign(&message);
+    let witness = build_witness(&tx_id_hash, &recipient_hash, amount, &signature);
+
+    let mut context = Context::default();
+    let (registry_out_point, _, registry_cell, _) = mint_registry(&mut context);
+    let actual_reserver_lock_hash = [42u8; 32]; // not present among this tx's inputs
+    let claimant_lock = claimant_lock(&mut context, 1);
+    let tx = build_escrow_claim_tx_with_reservation(
+        &mut context,
+        &signer.address(),
+        &recipient_hash,
+        amount,
+        &registry_out_point,
+        &registry_cell,
+        &[],
+        Some(&tx_id_hash),
+        witness,
+        &claimant_lock,
+        &actual_reserver_lock_hash,
+    );
+    let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
+    assert_script_error(err, 16); // ERROR_NOT_RESERVED_BY_CLAIMANT
 }
 
 /// Derives a Type ID mint value the exact same way ckb_std::type_id::check_type_id

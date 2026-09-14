@@ -59,12 +59,44 @@ ckb_std::default_alloc!(16384, 1258306, 64);
 // rules (append-only, no duplicates) are what actually make replay
 // impossible; this script's only job is to make sure the claim it just
 // verified is the SAME tx_id being registered, not some other one.
+//
+// Check 4 (reservation, the ghosting-prevention half only -- see the module
+// note below on what's deferred): the escrow cell's own DATA (not its args,
+// which are fixed forever) carries reservation state -- empty when open, or
+// exactly one 32-byte lock hash when reserved. Two transaction shapes are
+// recognized by GroupInput data length, plus (RESERVE only) an explicit
+// Output-side search: CKB Lock scripts never get a "GroupOutput" the way
+// Type scripts do -- only Type-script groups get output_indices populated
+// (see ckb-script's TxData::new) -- so there is no automatic notion of
+// "this input's corresponding output." RESERVE instead searches Source::
+// Output for the one cell whose lock hash matches this script's own hash.
+//   RESERVE:  GroupInput data is empty, and the Output cell sharing this
+//             script's own lock hash carries 32 bytes of data -- anyone may
+//             reserve an open offer (this is deliberately unauthorized; the
+//             reservation window bounds the cost of ghosting to wasted
+//             time, never money, matching the Bitshada plan's own
+//             "Non-payment and abuse cases" reasoning).
+//   CLAIM:    GroupInput data is 32 bytes (an active reservation) and a
+//             137-byte claim witness is present -- on top of every check
+//             above, the reserved lock hash must match some OTHER input's
+//             lock hash in this same transaction, proving the claimant is
+//             the same party who reserved it, not a different buyer racing
+//             in with someone else's valid-looking claim.
+//
+// Deliberately NOT implemented yet: reservation expiry / reopening an
+// abandoned offer, and the seller's own overall deadline reclaim path --
+// both need CKB's `since` timelock mechanism, out of scope for this
+// increment. Right now a reservation, once made, is permanent until
+// claimed; that's an honest, named MVP gap, not a hidden one.
 
 use alloc::vec::Vec;
 
 use ckb_std::ckb_constants::Source;
 use ckb_std::ckb_types::prelude::*;
-use ckb_std::high_level::{QueryIter, load_cell_data, load_cell_type_hash, load_script, load_witness_args};
+use ckb_std::high_level::{
+    QueryIter, load_cell_data, load_cell_lock_hash, load_cell_type_hash, load_script,
+    load_witness_args,
+};
 use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 use sha3::{Digest, Keccak256};
 
@@ -72,6 +104,7 @@ const ARGS_LEN: usize = 92;
 const WITNESS_LEN: usize = 137;
 const CLAIM_MSG_LEN: usize = 72; // tx_id_hash(32) + recipient_hash(32) + amount(8)
 const HASH_LEN: usize = 32;
+const RESERVATION_LEN: usize = 32; // reserved_by_lock_hash
 
 const ERROR_ARGS_LEN: i8 = 4;
 const ERROR_WITNESS_MISSING: i8 = 5;
@@ -83,6 +116,9 @@ const ERROR_RECIPIENT_MISMATCH: i8 = 10;
 const ERROR_AMOUNT_MISMATCH: i8 = 11;
 const ERROR_REGISTRY_NOT_FOUND: i8 = 12;
 const ERROR_REGISTRY_NOT_REGISTERING_THIS_CLAIM: i8 = 13;
+const ERROR_CELL_DATA_MISSING: i8 = 14;
+const ERROR_UNSUPPORTED_STRUCTURE: i8 = 15;
+const ERROR_NOT_RESERVED_BY_CLAIMANT: i8 = 16;
 
 pub fn program_entry() -> i8 {
     let script = match load_script() {
@@ -98,6 +134,40 @@ pub fn program_entry() -> i8 {
     let expected_amount = i64::from_le_bytes(args[52..60].try_into().unwrap());
     let expected_registry_type_hash = &args[60..92];
 
+    let input_data = match load_cell_data(0, Source::GroupInput) {
+        Ok(data) => data,
+        Err(_) => return ERROR_CELL_DATA_MISSING,
+    };
+
+    // RESERVE: open offer -> reserved. No claim witness involved at all.
+    //
+    // Lock scripts never get a "GroupOutput" in the way Type scripts do --
+    // CKB only populates output_indices for Type-script groups (an output
+    // cell has no independent notion of "being unlocked" the way an input
+    // does), so a Lock script has no built-in correspondence to any output.
+    // The RESERVE transition therefore finds its own continuation cell
+    // explicitly: the (only) Output whose lock hash matches this script's
+    // own hash.
+    if input_data.is_empty() {
+        let own_script_hash: [u8; 32] = script.calc_script_hash().unpack();
+        let output_index =
+            QueryIter::new(load_cell_lock_hash, Source::Output).position(|hash| hash == own_script_hash);
+        let output_data = match output_index {
+            Some(index) => load_cell_data(index, Source::Output).ok(),
+            None => None,
+        };
+        return match output_data {
+            Some(data) if data.len() == RESERVATION_LEN => 0,
+            _ => ERROR_UNSUPPORTED_STRUCTURE,
+        };
+    }
+
+    // Anything else must be a CLAIM: an active reservation being spent.
+    if input_data.len() != RESERVATION_LEN {
+        return ERROR_UNSUPPORTED_STRUCTURE;
+    }
+    let reserved_by_lock_hash = &input_data[..];
+
     let witness_args = match load_witness_args(0, ckb_std::ckb_constants::Source::GroupInput) {
         Ok(witness_args) => witness_args,
         Err(_) => return ERROR_WITNESS_MISSING,
@@ -109,6 +179,16 @@ pub fn program_entry() -> i8 {
     let witness: Vec<u8> = lock_field.unpack();
     if witness.len() != WITNESS_LEN {
         return ERROR_WITNESS_LEN;
+    }
+
+    // The claimant must be the same party who holds the reservation: some
+    // OTHER input in this transaction (e.g. the buyer's own funding input)
+    // must already be locked by the reserved lock hash. Same "authorization
+    // delegation" pattern as SUDT's owner-mode check (Week 9).
+    let claimant_present = QueryIter::new(load_cell_lock_hash, Source::Input)
+        .any(|hash| hash == reserved_by_lock_hash);
+    if !claimant_present {
+        return ERROR_NOT_RESERVED_BY_CLAIMANT;
     }
 
     let tx_id_hash = &witness[0..32];
