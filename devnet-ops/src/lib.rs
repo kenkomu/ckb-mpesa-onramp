@@ -249,6 +249,43 @@ pub fn get_one_cell(lock: &Script) -> (OutPoint, u64) {
     (op, capacity)
 }
 
+/// Collects live, type-less cells at `lock` until their summed capacity
+/// reaches `need`, or panics if the devnet hasn't mined enough yet --
+/// callers should just let the miner run longer and retry. Needed
+/// whenever a single ~2010 CKB cellbase cell isn't enough on its own
+/// (e.g. funding a data cell for a real contract binary).
+pub fn collect_cells(lock: &Script, need: u64) -> (Vec<(OutPoint, u64)>, u64) {
+    let script_json = json!({
+        "code_hash": format!("0x{}", hex::encode(lock.code_hash().raw_data())),
+        "hash_type": "type",
+        "args": format!("0x{}", hex::encode(lock.args().raw_data())),
+    });
+    let result = rpc_call("get_cells", json!([{"script": script_json, "script_type": "lock"}, "asc", "0x3e8"]));
+    let objects = result["objects"].as_array().cloned().unwrap_or_default();
+    let mut collected = Vec::new();
+    let mut total = 0u64;
+    for obj in objects {
+        if total >= need {
+            break;
+        }
+        if !obj["output"]["type"].is_null() {
+            continue;
+        }
+        let tx_hash = hex32(obj["out_point"]["tx_hash"].as_str().unwrap());
+        let index =
+            u32::from_str_radix(obj["out_point"]["index"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap();
+        let capacity =
+            u64::from_str_radix(obj["output"]["capacity"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap();
+        let op = OutPoint::new_builder().tx_hash(tx_hash.pack()).index(index).build();
+        collected.push((op, capacity));
+        total += capacity;
+    }
+    if total < need {
+        panic!("not enough mined capacity yet: have {total} shannon, need {need} shannon -- let the miner run longer");
+    }
+    (collected, total)
+}
+
 /// A plain `dep_type: code` cell_dep pointing at one of our own deployed
 /// binaries (from `deploy.rs`'s `deployed.json`), used with hash_type
 /// Data1 (their code_hash is `blake2b_256` of the raw binary bytes --

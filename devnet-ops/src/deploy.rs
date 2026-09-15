@@ -7,62 +7,13 @@
 use ckb_types::{
     bytes::Bytes,
     core::{Capacity, TransactionBuilder},
-    packed::{CellInput, CellOutput, OutPoint, WitnessArgs},
+    packed::{CellInput, CellOutput, WitnessArgs},
     prelude::*,
 };
 use devnet_ops::*;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
-
-/// Collects live cells at `lock` (via the Indexer RPC) until their summed
-/// capacity reaches `need`, or panics if the devnet hasn't mined enough
-/// yet -- callers should just let the miner run longer and retry.
-fn collect_inputs(lock: &ckb_types::packed::Script, need: u64) -> (Vec<(OutPoint, u64)>, u64) {
-    let script_json = json!({
-        "code_hash": format!("0x{}", hex::encode(lock.code_hash().raw_data())),
-        "hash_type": "type",
-        "args": format!("0x{}", hex::encode(lock.args().raw_data())),
-    });
-    let result = rpc_call(
-        "get_cells",
-        json!([{"script": script_json, "script_type": "lock"}, "asc", "0x3e8"]),
-    );
-    let objects = result["objects"].as_array().cloned().unwrap_or_default();
-    let mut collected = Vec::new();
-    let mut total = 0u64;
-    for obj in objects {
-        if total >= need {
-            break;
-        }
-        // Only plain, type-less cells (our cellbase outputs) -- skip
-        // anything already carrying a type script or non-empty data.
-        if !obj["output"]["type"].is_null() {
-            continue;
-        }
-        let out_point = obj["out_point"].clone();
-        let tx_hash = out_point["tx_hash"].as_str().unwrap().to_string();
-        let index = u32::from_str_radix(out_point["index"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap();
-        let capacity = u64::from_str_radix(obj["output"]["capacity"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap();
-        let op = OutPoint::new_builder()
-            .tx_hash({
-                let bytes = hex::decode(tx_hash.trim_start_matches("0x")).unwrap();
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                arr.pack()
-            })
-            .index(index)
-            .build();
-        collected.push((op, capacity));
-        total += capacity;
-    }
-    if total < need {
-        panic!(
-            "not enough mined capacity yet: have {total} shannon, need {need} shannon -- let the miner run longer"
-        );
-    }
-    (collected, total)
-}
 
 fn main() {
     let (blake160, signing_key) = load_key(env!("CARGO_MANIFEST_DIR"));
@@ -94,7 +45,7 @@ fn main() {
 
     println!("Need {} CKB total ({} CKB in deployed binaries + {} CKB change + fee)", need as f64 / 1e8, outputs_total as f64 / 1e8, change_min as f64 / 1e8);
 
-    let (inputs, collected_total) = collect_inputs(&lock, need);
+    let (inputs, collected_total) = collect_cells(&lock, need);
     println!("Collected {} input cells totaling {} CKB", inputs.len(), collected_total as f64 / 1e8);
 
     let change_capacity = collected_total - outputs_total - fee;

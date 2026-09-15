@@ -44,8 +44,10 @@ fn load_or_create_buyer(manifest_dir: &str) -> ([u8; 20], SigningKey) {
 }
 
 fn main() {
-    let (seller_blake160, seller_key) = load_key(env!("CARGO_MANIFEST_DIR"));
-    let seller_lock = sighash_lock(&seller_blake160);
+    // Note: the seller's own key doesn't appear anywhere in this script.
+    // It used to have to co-sign the registry input (see
+    // registry_lock_script below for why that's gone) -- a real buyer can
+    // now submit a claim with nobody else needing to be online to sign.
     let (buyer_blake160, buyer_key) = load_or_create_buyer(env!("CARGO_MANIFEST_DIR"));
     let buyer_lock = sighash_lock(&buyer_blake160);
 
@@ -65,6 +67,12 @@ fn main() {
         &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("registry.json")).unwrap(),
     )
     .unwrap();
+    let always_success: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deployed_always_success.json")).unwrap(),
+    )
+    .unwrap();
+    let always_success_tx_hash = always_success["tx_hash"].as_str().unwrap().to_string();
+    let always_success_index = always_success["index"].as_u64().unwrap() as u32;
     let offer: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("offer.json")).unwrap())
             .unwrap();
@@ -206,9 +214,18 @@ fn main() {
     let mut new_registry_data = registry_data;
     new_registry_data.extend_from_slice(&tx_id_hash);
     let registry_lock_script = {
-        // The registry cell's own lock is our seller sighash lock (set at
-        // mint time in mint_registry.rs) -- reused unchanged here, plain transfer.
-        seller_lock.clone()
+        // The registry cell's own lock is the permissionless always-success
+        // lock (see remint_registry.rs / the always-success contract's own
+        // doc comment) -- no signature needed at all, by design: the
+        // registry's Type Script already fully gates every mutation that
+        // matters, so a buyer can submit a claim without needing anyone
+        // else to co-sign.
+        let always_success_code_hash = hex32(registry["always_success_code_hash"].as_str().unwrap());
+        Script::new_builder()
+            .code_hash(always_success_code_hash.pack())
+            .hash_type(ScriptHashType::Data1)
+            .args(Bytes::new().pack())
+            .build()
     };
     let registry_type_script = {
         let registry_binary = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry")).unwrap();
@@ -256,26 +273,17 @@ fn main() {
         .cell_dep(deployed_binary_cell_dep(&deploy_tx_hash, escrow_index))
         .cell_dep(deployed_binary_cell_dep(&deploy_tx_hash, registry_index))
         .cell_dep(deployed_binary_cell_dep(&deploy_tx_hash, guard_index))
+        .cell_dep(deployed_binary_cell_dep(&always_success_tx_hash, always_success_index))
         .build();
 
-    // Three separate script groups share this one transaction:
-    //   input 0 (escrow, a CUSTOM lock): no CKB-level signature at all --
-    //     mpesa-escrow never calls into the sighash algorithm; its own
-    //     witness (the claim, embedded above) is everything it reads.
-    //   input 1 (buyer's own sighash-controlled funding cell): needs a
-    //     real signature from the buyer's key.
-    //   input 2 (the registry cell, also sighash-controlled, owned by the
-    //     seller since mint_registry.rs never changed its lock): needs a
-    //     real signature from the seller's key.
-    // `sign_group` only ever touches witnesses[group_start], but it still
-    // needs the CURRENT witnesses vector each time (not the stale
-    // pre-signing one) since it rebuilds the whole witnesses list from
-    // whatever's passed in -- otherwise the second call would silently
-    // discard the first call's signature.
-    let witnesses_after_escrow = vec![escrow_witness_args, buyer_witness, registry_witness];
-    let claim_tx = sign_group(claim_tx, &buyer_key, 1, 1, witnesses_after_escrow);
-    let witnesses_after_buyer: Vec<Bytes> = claim_tx.witnesses().into_iter().map(|w| w.raw_data()).collect();
-    let claim_tx = sign_group(claim_tx, &seller_key, 2, 1, witnesses_after_buyer);
+    // Two of this transaction's three script groups need no signing at
+    // all: input 0 (escrow, a CUSTOM lock) never calls into the sighash
+    // algorithm -- its own witness (the claim, embedded above) is
+    // everything it reads -- and input 2 (the registry, always-success
+    // locked) ignores its witness entirely. Only input 1, the buyer's own
+    // sighash-controlled funding cell, needs a real signature.
+    let witnesses = vec![escrow_witness_args, buyer_witness, registry_witness];
+    let claim_tx = sign_group(claim_tx, &buyer_key, 1, 1, witnesses);
 
     let tx_hash = send_transaction(&claim_tx);
     println!("Sent CLAIM tx: {tx_hash}");

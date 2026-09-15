@@ -49,3 +49,11 @@ path = "src/claim_offer.rs"
 [[bin]]
 name = "fund_buyer"
 path = "src/fund_buyer.rs"
+
+[[bin]]
+name = "deploy_always_success"
+path = "src/deploy_always_success.rs"
+
+[[bin]]
+name = "remint_registry"
+path = "src/remint_registry.rs"
