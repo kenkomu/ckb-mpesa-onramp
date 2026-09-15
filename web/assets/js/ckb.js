@@ -234,8 +234,22 @@ function toRpcTransaction(tx) {
 }
 
 async function submit(tx) {
-  const { tx_hash } = await postJson("/api/tx/send", { transaction: toRpcTransaction(tx) });
-  return tx_hash;
+  // Computed locally (deterministic from the tx's own bytes) so that if
+  // the node rejects this exact submission as a duplicate -- e.g. a fast
+  // double-click re-sending the identical, already-signed transaction
+  // before the UI disabled the button -- we can still report the real
+  // tx hash as a success instead of surfacing a spurious failure for a
+  // transaction that had already been accepted moments earlier.
+  const txHash = tx.hash();
+  try {
+    const { tx_hash } = await postJson("/api/tx/send", { transaction: toRpcTransaction(tx) });
+    return tx_hash;
+  } catch (err) {
+    if (/already exist in transaction_pool|PoolRejectedDuplicatedTransaction/.test(String(err))) {
+      return txHash;
+    }
+    throw err;
+  }
 }
 
 // ---- the three flows ----

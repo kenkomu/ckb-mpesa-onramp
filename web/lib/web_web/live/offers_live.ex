@@ -181,7 +181,7 @@ defmodule WebWeb.OffersLive do
               <span class="label-text text-xs opacity-70">Amount (KES minor units)</span>
               <input type="text" name="amount" class="input input-bordered input-sm w-32" placeholder="25000" />
             </label>
-            <.button type="submit" disabled={@busy == :create} class="btn-primary">
+            <.button type="submit" disabled={@busy == :create} phx-disable-with="Creating..." class="btn-primary">
               <span :if={@busy == :create} class="loading loading-spinner loading-xs"></span>
               {if @busy == :create, do: "Creating...", else: "Create offer"}
             </.button>
@@ -215,6 +215,7 @@ defmodule WebWeb.OffersLive do
                 phx-value-tx_hash={offer.out_point["tx_hash"]}
                 phx-value-index={offer.out_point["index"]}
                 disabled={@busy == :reserve}
+                phx-disable-with="Reserving..."
                 class="btn-primary btn-sm w-full"
               >
                 <span :if={@busy == :reserve} class="loading loading-spinner loading-xs"></span>
@@ -226,6 +227,7 @@ defmodule WebWeb.OffersLive do
                 phx-value-tx_hash={offer.out_point["tx_hash"]}
                 phx-value-index={offer.out_point["index"]}
                 disabled={@busy == :claim}
+                phx-disable-with="Claiming..."
                 class="btn-primary btn-sm w-full"
               >
                 <span :if={@busy == :claim} class="loading loading-spinner loading-xs"></span>
