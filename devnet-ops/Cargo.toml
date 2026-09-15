@@ -61,3 +61,7 @@ path = "src/remint_registry.rs"
 [[bin]]
 name = "fund_address"
 path = "src/fund_address.rs"
+
+[[bin]]
+name = "fund_lock_args"
+path = "src/fund_lock_args.rs"
