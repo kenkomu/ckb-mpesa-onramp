@@ -65,3 +65,15 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+# The local devnet this app reads offers from (see ../devnet-ops and
+# ../devnet), plus the contract identity mpesa-escrow was deployed under --
+# both change if the devnet is ever reset and redeployed. `data1` is the
+# CKB VM version the contract binaries were compiled for (they use the
+# Zba/Zbb/Zbc/Zbs bit-manipulation extensions, only available from VM
+# version 1 onward), and code_hash is blake2b_256 of the raw binary bytes
+# -- matching devnet-ops's own `deployed_binary_cell_dep` convention.
+config :web, :ckb,
+  rpc_url: "http://127.0.0.1:8114",
+  mpesa_escrow_code_hash: "0x74e8b52b2043efe2386a5f838a0a0ce44d0d087025e95a575eb40ba38b54e0f9",
+  mpesa_escrow_hash_type: "data1"
