@@ -1,0 +1,51 @@
+[package]
+name = "devnet-ops"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "gen_key"
+path = "src/gen_key.rs"
+
+[[bin]]
+name = "deploy"
+path = "src/deploy.rs"
+
+[dependencies]
+k256 = { version = "0.13", features = ["ecdsa"] }
+sha3 = "0.10"
+rand = "0.8"
+hex = "0.4"
+ckb-hash = "1.1"
+ckb-types = "1.1"
+ckb-jsonrpc-types = "1.1"
+serde_json = "1.0"
+ureq = "2"
+
+[lib]
+name = "devnet_ops"
+path = "src/lib.rs"
+
+[[bin]]
+name = "selftest"
+path = "src/selftest.rs"
+
+[[bin]]
+name = "mint_registry"
+path = "src/mint_registry.rs"
+
+[[bin]]
+name = "mint_offer_guard"
+path = "src/mint_offer_guard.rs"
+
+[[bin]]
+name = "create_offer"
+path = "src/create_offer.rs"
+
+[[bin]]
+name = "claim_offer"
+path = "src/claim_offer.rs"
+
+[[bin]]
+name = "fund_buyer"
+path = "src/fund_buyer.rs"
