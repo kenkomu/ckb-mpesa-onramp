@@ -66,14 +66,57 @@ config :phoenix_live_view,
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
 
-# The local devnet this app reads offers from (see ../devnet-ops and
-# ../devnet), plus the contract identity mpesa-escrow was deployed under --
-# both change if the devnet is ever reset and redeployed. `data1` is the
-# CKB VM version the contract binaries were compiled for (they use the
+# The local devnet this app reads from and builds transactions against
+# (see ../devnet-ops and ../devnet) -- every hash/outpoint below is
+# specific to THIS devnet's current deployment and changes if the devnet
+# is ever reset and redeployed (rerun the relevant devnet-ops binary and
+# copy its JSON output's values back in here). `data1` is the CKB VM
+# version every contract binary here was compiled for (they use the
 # Zba/Zbb/Zbc/Zbs bit-manipulation extensions, only available from VM
-# version 1 onward), and code_hash is blake2b_256 of the raw binary bytes
-# -- matching devnet-ops's own `deployed_binary_cell_dep` convention.
+# version 1 onward); each `code_hash` is blake2b_256 of the raw binary
+# bytes, matching devnet-ops's own `deployed_binary_cell_dep` convention.
 config :web, :ckb,
   rpc_url: "http://127.0.0.1:8114",
-  mpesa_escrow_code_hash: "0x74e8b52b2043efe2386a5f838a0a0ce44d0d087025e95a575eb40ba38b54e0f9",
-  mpesa_escrow_hash_type: "data1"
+  sighash_code_hash: "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8",
+  # See devnet-ops's own sighash_cell_dep() doc comment: this MUST be a
+  # dep_group, not a direct code reference, or every signature fails.
+  sighash_dep_group: %{tx_hash: "0xc05f08a40fc9879abb49b5a2c32a1e8bc6fa6ce33ed22d0f96bc405b2e267b70", index: 0},
+  mpesa_escrow: %{
+    code_hash: "0x74e8b52b2043efe2386a5f838a0a0ce44d0d087025e95a575eb40ba38b54e0f9",
+    hash_type: "data1",
+    cell_dep: %{tx_hash: "0x7d39c6d620218d7725159dcf203ef313d261cd1d10dd195df5c406ee273311be", index: 1}
+  },
+  claims_registry: %{
+    code_hash: "0x5cfd31a4a0775052dd45b85637cabd9086b5f7f5d257227153b583d72f3c1000",
+    hash_type: "data1",
+    cell_dep: %{tx_hash: "0x7d39c6d620218d7725159dcf203ef313d261cd1d10dd195df5c406ee273311be", index: 0},
+    # The one, canonical, permissionless registry cell -- see
+    # devnet-ops/src/remint_registry.rs. cell: where the LIVE cell
+    # currently is (changes every claim, since it's consume-and-recreate;
+    # the API looks this up live, this is just the identity/type info).
+    type_hash: "0x3e8ab4b40421d56337f3204b0fb0fa2e96f9bf9bc322e3142e5e4d5778b694c5",
+    type_args: "0x9d95b002b5c5c6c0910522c302bef36d0a3183208f28521c4a0f8a3bf581839c",
+    genesis_out_point: %{tx_hash: "0x8a3e189a89df7ac36fc4aa310573961a544e3d38177b2f4c458b7b519f158c81", index: 0}
+  },
+  offer_guard: %{
+    code_hash: "0x13c3c2b25bda33139e4d0ba52868b478d98d47c166d979e18898a3b8cfa786ba",
+    hash_type: "data1",
+    cell_dep: %{tx_hash: "0x7d39c6d620218d7725159dcf203ef313d261cd1d10dd195df5c406ee273311be", index: 2}
+  },
+  always_success: %{
+    code_hash: "0xfd5c9693329386bf61812189788840c4438240b2ec536385a51e473c48727d1a",
+    hash_type: "data1",
+    cell_dep: %{tx_hash: "0x9069c933d8d72320412fea8bc5adbb57d981f8a47740077faff2a6070fbccb39", index: 0}
+  },
+  # The trusted Verifier's own key. This MVP colocates it with Phoenix as
+  # a stand-in for Ken's real, separate off-chain TLSNotary Verifier
+  # service (see Web.Ckb.Verifier's own moduledoc) -- reusing the exact
+  # key devnet-ops/verifier_key.txt already generated, so offers created
+  # through the UI and offers created through devnet-ops's own scripts
+  # trust the same identity. Override via BITSHADA_VERIFIER_PRIVATE_KEY
+  # for anything other than this exact devnet.
+  verifier_private_key:
+    System.get_env(
+      "BITSHADA_VERIFIER_PRIVATE_KEY",
+      "0xf772d0917cd21824b6259816aa2da2a9675e7ff25b8a5e41703c34cb6d05a30e"
+    )

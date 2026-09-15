@@ -42,6 +42,14 @@ defmodule Web.MixProject do
     [
       {:phoenix, "~> 1.8.9"},
       {:phoenix_html, "~> 4.1"},
+      # The trusted Verifier's own signing keys -- secp256k1 (recoverable,
+      # SECP256K1ETH-style) + Keccak256, matching mpesa-escrow's and
+      # offer-guard's own recover_eth_address exactly (see
+      # contract/contracts/mpesa-escrow/src/main.rs). Real NIFs (Rust
+      # under the hood via rustler), not a from-scratch Elixir
+      # implementation of security-sensitive curve math.
+      {:ex_secp256k1, "~> 0.8"},
+      {:ex_keccak, "~> 0.7"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_view, "~> 1.2.0"},
       {:lazy_html, ">= 0.1.0", only: :test},

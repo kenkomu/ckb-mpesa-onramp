@@ -57,3 +57,7 @@ path = "src/deploy_always_success.rs"
 [[bin]]
 name = "remint_registry"
 path = "src/remint_registry.rs"
+
+[[bin]]
+name = "fund_address"
+path = "src/fund_address.rs"

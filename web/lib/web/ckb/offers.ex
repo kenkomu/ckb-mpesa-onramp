@@ -44,12 +44,12 @@ defmodule Web.Ckb.Offers do
   state, this module never raises for it.
   """
   def list do
-    config = Application.fetch_env!(:web, :ckb)
+    escrow = Application.fetch_env!(:web, :ckb) |> Keyword.fetch!(:mpesa_escrow)
 
     search_key = %{
       "script" => %{
-        "code_hash" => Keyword.fetch!(config, :mpesa_escrow_code_hash),
-        "hash_type" => Keyword.fetch!(config, :mpesa_escrow_hash_type),
+        "code_hash" => escrow.code_hash,
+        "hash_type" => escrow.hash_type,
         # Empty args + prefix mode matches every mpesa-escrow cell
         # regardless of its specific witness_address/recipient_hash/
         # amount/registry/guard combination -- this is a marketplace

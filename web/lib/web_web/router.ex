@@ -21,10 +21,22 @@ defmodule WebWeb.Router do
     live "/offers", OffersLive
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", WebWeb do
-  #   pipe_through :api
-  # end
+  # The JSON API surface: everything a mobile app (or the web UI's own
+  # CCC-based JS) needs to build and submit mpesa-escrow transactions
+  # itself. Read-only except send/2 (relays an already-signed tx) and the
+  # verifier endpoints (produce an off-chain attestation signature, never
+  # a chain-affecting action) -- see each controller's own moduledoc.
+  scope "/api", WebWeb.Api do
+    pipe_through :api
+
+    get "/config", ConfigController, :show
+    get "/offers", OffersController, :index
+    get "/registry", RegistryController, :current
+    get "/cells", CellsController, :index
+    post "/tx/send", TxController, :send
+    post "/verifier/ownership_signature", VerifierController, :ownership_signature
+    post "/verifier/claim_signature", VerifierController, :claim_signature
+  end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:web, :dev_routes) do
