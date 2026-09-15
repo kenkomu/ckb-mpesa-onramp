@@ -233,7 +233,7 @@ function toRpcTransaction(tx) {
   };
 }
 
-async function submit(tx) {
+async function submit(tx, config) {
   // Computed locally (deterministic from the tx's own bytes) so that if
   // the node rejects this exact submission as a duplicate -- e.g. a fast
   // double-click re-sending the identical, already-signed transaction
@@ -241,15 +241,43 @@ async function submit(tx) {
   // tx hash as a success instead of surfacing a spurious failure for a
   // transaction that had already been accepted moments earlier.
   const txHash = tx.hash();
+  let sentHash;
   try {
     const { tx_hash } = await postJson("/api/tx/send", { transaction: toRpcTransaction(tx) });
-    return tx_hash;
+    sentHash = tx_hash;
   } catch (err) {
     if (/already exist in transaction_pool|PoolRejectedDuplicatedTransaction/.test(String(err))) {
-      return txHash;
+      sentHash = txHash;
+    } else {
+      throw err;
     }
-    throw err;
   }
+  // send_transaction only means "accepted into the mempool" -- callers
+  // (the LiveView UI in particular) immediately re-read offer state
+  // after this resolves, and the indexer only reflects COMMITTED cells.
+  // Without waiting here, a just-claimed/-reserved offer still shows its
+  // pre-transaction state until the next block happens to land, which
+  // looked like "the UI doesn't update" even though the tx had already
+  // succeeded. Wait for real commitment before reporting success.
+  await waitCommitted(sentHash, config);
+  return sentHash;
+}
+
+async function waitCommitted(txHash, config, { timeoutMs = 30000, intervalMs = 400 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const res = await fetch(config.rpc_url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "get_transaction", params: [txHash] }),
+    });
+    const { result } = await res.json();
+    const status = result?.tx_status?.status;
+    if (status === "committed") return;
+    if (status === "rejected") throw new Error(`Transaction ${txHash} was rejected: ${JSON.stringify(result.tx_status.reason)}`);
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(`Transaction ${txHash} did not commit within ${timeoutMs}ms`);
 }
 
 // ---- the three flows ----
@@ -324,7 +352,7 @@ export async function createOffer(recipientHashHex, amountMinorUnits) {
   tx.addCellDeps(sighashCellDep(config), contractCellDep(config.mpesa_escrow), contractCellDep(config.offer_guard));
 
   const signed = await signer.signOnlyTransaction(tx);
-  return submit(signed);
+  return submit(signed, config);
 }
 
 /**
@@ -355,7 +383,7 @@ export async function reserveOffer(offer) {
   });
   tx.addCellDeps(contractCellDep(config.mpesa_escrow), contractCellDep(config.offer_guard));
 
-  return submit(tx);
+  return submit(tx, config);
 }
 
 /**
@@ -440,5 +468,5 @@ export async function claimOffer(offer, txIdSeed) {
   );
 
   const signed = await signer.signOnlyTransaction(tx);
-  return submit(signed);
+  return submit(signed, config);
 }
