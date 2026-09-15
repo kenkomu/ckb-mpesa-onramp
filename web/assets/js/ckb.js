@@ -96,12 +96,31 @@ async function getSigner() {
 }
 
 export async function walletInfo() {
-  const { signer } = await getSigner();
+  const { signer, config } = await getSigner();
   const addressObj = await signer.getAddressObjSecp256k1();
+  const balanceShannon = await getCapacityByLock(config, addressObj.script);
   return {
     lockHash: addressObj.script.hash(),
     address: addressObj.toString(),
+    balanceCkb: Number(balanceShannon) / 100_000_000,
   };
+}
+
+/** Summed capacity (shannon) of every live cell at `script`, via a direct get_cells_capacity RPC call. */
+async function getCapacityByLock(config, script) {
+  const res = await fetch(config.rpc_url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      method: "get_cells_capacity",
+      params: [{ script: scriptToRpc(script), script_type: "lock" }],
+    }),
+  });
+  const { result, error } = await res.json();
+  if (error) throw new Error(`get_cells_capacity failed: ${error.message}`);
+  return BigInt(result.capacity);
 }
 
 // ---- byte-level helpers matching the contracts' own layouts ----

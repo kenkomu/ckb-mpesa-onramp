@@ -18,6 +18,22 @@ defmodule Web.Ckb.Offers do
   the buyer's own lock), so it simply stops showing up in `list/0` -- the
   chain itself is the source of truth for "still open," not a flag this
   code has to maintain.
+
+  `list/0` also drops any offer whose baked-in `registry_type_hash`
+  doesn't match the currently configured claims-registry. Each registry
+  re-mint (see devnet-ops/src/remint_registry.rs) gives the live registry
+  cell a brand new Type ID identity/type hash -- an offer minted under a
+  since-replaced registry can never be claimed again (its args point at
+  a type hash no live cell carries anymore), so surfacing it in the
+  marketplace only invites a guaranteed-to-fail Reserve/Claim click.
+
+  It also drops any *open* offer minted without headroom above its own
+  bare minimum capacity: RESERVE writes a 32-byte reservation flag into
+  the SAME cell (see mpesa-escrow's own check-4 doc comment), and a CKB
+  cell can never shrink below its own occupied size -- a cell minted at
+  exactly its empty-data minimum overflows the instant RESERVE tries to
+  write into it. `@min_open_capacity_shannon` is that bare minimum,
+  computed from the fixed byte layout below, not queried per-cell.
   """
 
   alias Web.Ckb.Rpc
@@ -35,7 +51,13 @@ defmodule Web.Ckb.Offers do
   ]
 
   @args_len 124
+  @guard_args_len 52
   @reservation_len 32
+  # capacity(8) + lock{code_hash(32)+hash_type(1)+args(@args_len)} +
+  # type{code_hash(32)+hash_type(1)+args(@guard_args_len)} + data(0) --
+  # the minimum viable capacity for an OPEN escrow cell (no reservation
+  # data written yet). See the moduledoc's headroom note.
+  @min_open_capacity_shannon (8 + 32 + 1 + @args_len + 32 + 1 + @guard_args_len) * 100_000_000
 
   @doc """
   Lists every live mpesa-escrow cell on the configured node, regardless of
@@ -44,7 +66,9 @@ defmodule Web.Ckb.Offers do
   state, this module never raises for it.
   """
   def list do
-    escrow = Application.fetch_env!(:web, :ckb) |> Keyword.fetch!(:mpesa_escrow)
+    ckb_config = Application.fetch_env!(:web, :ckb)
+    escrow = Keyword.fetch!(ckb_config, :mpesa_escrow)
+    live_registry_type_hash = Keyword.fetch!(ckb_config, :claims_registry).type_hash
 
     search_key = %{
       "script" => %{
@@ -61,7 +85,13 @@ defmodule Web.Ckb.Offers do
     }
 
     with {:ok, %{"objects" => objects}} <- Rpc.call("get_cells", [search_key, "asc", "0x64"]) do
-      {:ok, Enum.map(objects, &decode_cell/1)}
+      offers =
+        objects
+        |> Enum.map(&decode_cell/1)
+        |> Enum.filter(&(&1.registry_type_hash == live_registry_type_hash))
+        |> Enum.filter(&reservable?/1)
+
+      {:ok, offers}
     end
   end
 
@@ -89,6 +119,11 @@ defmodule Web.Ckb.Offers do
   end
 
   defp put_status(offer, _other), do: %{offer | status: :unknown}
+
+  defp reservable?(%{status: :open} = offer),
+    do: offer.capacity_shannon >= @min_open_capacity_shannon + @reservation_len * 100_000_000
+
+  defp reservable?(_already_reserved_or_unknown), do: true
 
   defp unhex("0x" <> hex), do: Base.decode16!(hex, case: :mixed)
   defp unhex(hex), do: Base.decode16!(hex, case: :mixed)
