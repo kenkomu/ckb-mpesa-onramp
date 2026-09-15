@@ -29,7 +29,7 @@ defmodule WebWeb.OffersLive do
   end
 
   def handle_event("refresh", _params, socket) do
-    {:noreply, load_offers(socket)}
+    {:noreply, socket |> assign(notice: nil, tx_error: nil) |> load_offers()}
   end
 
   def handle_event("wallet_ready", %{"address" => address, "lockHash" => lock_hash, "balanceCkb" => balance_ckb}, socket) do
@@ -245,7 +245,7 @@ defmodule WebWeb.OffersLive do
       </div>
 
       <div class="flex justify-center pt-2">
-        <.button phx-click="refresh" class="btn-ghost btn-sm">Refresh</.button>
+        <.button phx-click="refresh" phx-disable-with="Refreshing..." class="btn-ghost btn-sm">Refresh</.button>
       </div>
     </div>
     """
