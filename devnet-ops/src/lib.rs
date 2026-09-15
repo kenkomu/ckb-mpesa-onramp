@@ -15,7 +15,11 @@ use ckb_types::{
 use k256::ecdsa::{RecoveryId, Signature, SigningKey};
 use serde_json::{json, Value};
 
-pub const RPC_URL: &str = "http://127.0.0.1:8114";
+/// Defaults to the local devnet; override with `CKB_RPC_URL` to point every
+/// binary in this crate at testnet (or anywhere else) without touching code.
+pub fn rpc_url() -> String {
+    std::env::var("CKB_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8114".to_string())
+}
 
 /// The standard secp256k1_blake160_sighash_all system script's own type
 /// hash -- fixed across all CKB chains (mainnet/testnet/dev), since it's
@@ -38,22 +42,35 @@ pub const SIGHASH_CODE_HASH: &str = "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4
 /// is an OutPointVec naming both real cells. This devnet's own dep_group
 /// outpoint (found the same way, by diffing a known-good transaction --
 /// there's no RPC that names it directly).
-pub const SIGHASH_DEP_GROUP_TX_HASH: &str = "0xc05f08a40fc9879abb49b5a2c32a1e8bc6fa6ce33ed22d0f96bc405b2e267b70";
-pub const SIGHASH_DEP_GROUP_INDEX: u32 = 0;
+/// Devnet's own dep_group outpoint by default -- testnet/mainnet have
+/// their own well-known, stable equivalents (testnet:
+/// 0xf8de3bb47d055cdf460d93a2a6e1b05f7432f9777c8c474abf4eec1d4aee5d37,
+/// index 0), overridable via `CKB_SIGHASH_DEP_GROUP_TX_HASH`/
+/// `CKB_SIGHASH_DEP_GROUP_INDEX` since each chain's genesis constructs
+/// this bundling cell independently.
+pub fn sighash_dep_group_tx_hash() -> String {
+    std::env::var("CKB_SIGHASH_DEP_GROUP_TX_HASH")
+        .unwrap_or_else(|_| "0xc05f08a40fc9879abb49b5a2c32a1e8bc6fa6ce33ed22d0f96bc405b2e267b70".to_string())
+}
+
+pub fn sighash_dep_group_index() -> u32 {
+    std::env::var("CKB_SIGHASH_DEP_GROUP_INDEX").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+}
 
 pub fn sighash_cell_dep() -> CellDep {
-    let tx_hash_vec = hex::decode(&SIGHASH_DEP_GROUP_TX_HASH[2..]).expect("valid hex");
+    let tx_hash_hex = sighash_dep_group_tx_hash();
+    let tx_hash_vec = hex::decode(tx_hash_hex.trim_start_matches("0x")).expect("valid hex");
     let mut tx_hash = [0u8; 32];
     tx_hash.copy_from_slice(&tx_hash_vec);
     CellDep::new_builder()
-        .out_point(OutPoint::new_builder().tx_hash(tx_hash.pack()).index(SIGHASH_DEP_GROUP_INDEX).build())
+        .out_point(OutPoint::new_builder().tx_hash(tx_hash.pack()).index(sighash_dep_group_index()).build())
         .dep_type(DepType::DepGroup)
         .build()
 }
 
 pub fn rpc_call(method: &str, params: Value) -> Value {
     let body = json!({"id": 1, "jsonrpc": "2.0", "method": method, "params": params});
-    let response_text = ureq::post(RPC_URL)
+    let response_text = ureq::post(&rpc_url())
         .set("Content-Type", "application/json")
         .send_string(&body.to_string())
         .unwrap_or_else(|e| panic!("RPC call {method} failed: {e}"))
@@ -203,11 +220,15 @@ pub fn hex32(s: &str) -> [u8; 32] {
     out
 }
 
-/// Reads `devnet_key.txt` (written by `gen_key`) and returns the signer's
-/// blake160 lock args plus the raw signing key.
+/// Reads a key file in the same `private_key=0x.. / lock_args_blake160=0x..`
+/// shape `gen_key` writes, and returns the signer's blake160 lock args plus
+/// the raw signing key. Filename defaults to `devnet_key.txt`, overridable
+/// via `CKB_KEY_FILE` so the exact same binaries can drive a real funded
+/// testnet key instead (e.g. `CKB_KEY_FILE=testnet_key.txt`).
 pub fn load_key(manifest_dir: &str) -> ([u8; 20], SigningKey) {
-    let text = std::fs::read_to_string(std::path::Path::new(manifest_dir).join("devnet_key.txt"))
-        .expect("read devnet_key.txt (run `cargo run --bin gen_key` first if missing)");
+    let file_name = std::env::var("CKB_KEY_FILE").unwrap_or_else(|_| "devnet_key.txt".to_string());
+    let text = std::fs::read_to_string(std::path::Path::new(manifest_dir).join(&file_name))
+        .unwrap_or_else(|_| panic!("read {file_name} (run `cargo run --bin gen_key` first if missing)"));
     let mut private_key_hex = None;
     let mut blake160_hex = None;
     for line in text.lines() {
