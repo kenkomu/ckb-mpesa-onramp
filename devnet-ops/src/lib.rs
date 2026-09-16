@@ -260,6 +260,20 @@ pub fn load_key(manifest_dir: &str) -> ([u8; 20], SigningKey) {
     (blake160, signing_key)
 }
 
+/// Total live capacity (shannon) at `lock`, via the indexer's own
+/// `get_cells_capacity` RPC -- a single aggregate query rather than
+/// paging through and summing individual cells.
+pub fn get_cells_capacity(lock: &Script) -> u64 {
+    let script_json = json!({
+        "code_hash": format!("0x{}", hex::encode(lock.code_hash().raw_data())),
+        "hash_type": "type",
+        "args": format!("0x{}", hex::encode(lock.args().raw_data())),
+    });
+    let result = rpc_call("get_cells_capacity", json!([{"script": script_json, "script_type": "lock"}]));
+    let capacity_hex = result["capacity"].as_str().expect("capacity in get_cells_capacity response");
+    u64::from_str_radix(capacity_hex.trim_start_matches("0x"), 16).expect("valid hex capacity")
+}
+
 /// Fetches exactly one live, type-less cell at `lock` via the Indexer RPC
 /// -- enough capacity for a single-input transaction. Panics if none
 /// exist (the caller should let the miner run and produce more cellbase

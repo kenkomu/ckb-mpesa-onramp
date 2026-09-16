@@ -65,3 +65,7 @@ path = "src/fund_address.rs"
 [[bin]]
 name = "fund_lock_args"
 path = "src/fund_lock_args.rs"
+
+[[bin]]
+name = "sweep"
+path = "src/sweep.rs"
