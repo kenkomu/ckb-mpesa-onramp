@@ -284,12 +284,18 @@ pub fn get_one_cell(lock: &Script) -> (OutPoint, u64) {
         "hash_type": "type",
         "args": format!("0x{}", hex::encode(lock.args().raw_data())),
     });
-    let result = rpc_call("get_cells", json!([{"script": script_json, "script_type": "lock"}, "asc", "0x1"]));
+    // Limit 0x40, not 0x1: the single frontmost cell in ascending order
+    // can easily be a deployed contract binary (large data, no type
+    // script, same lock) rather than plain funding -- scan a real window
+    // of candidates and pick the first that actually passes the filter,
+    // the same way collect_cells does, instead of only ever looking at
+    // one candidate and giving up.
+    let result = rpc_call("get_cells", json!([{"script": script_json, "script_type": "lock"}, "asc", "0x40"]));
     let objects = result["objects"].as_array().cloned().unwrap_or_default();
     let obj = objects
         .into_iter()
         .find(is_plain_funding_cell)
-        .unwrap_or_else(|| panic!("no live type-less cells at this lock -- let the miner run longer"));
+        .unwrap_or_else(|| panic!("no live type-less, empty-data cells at this lock -- let the miner run longer"));
     let tx_hash = hex32(obj["out_point"]["tx_hash"].as_str().unwrap());
     let index = u32::from_str_radix(obj["out_point"]["index"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap();
     let capacity = u64::from_str_radix(obj["output"]["capacity"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap();
