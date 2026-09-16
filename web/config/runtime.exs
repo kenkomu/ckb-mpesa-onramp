@@ -22,6 +22,50 @@ end
 
 config :web, WebWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Set CKB_NETWORK=testnet to point this app at the real CKB Pudge
+# testnet deployment instead of the local devnet dev.exs configures by
+# default. Every value below comes straight from a real, verified
+# testnet deployment (see devnet-ops/testnet_data/*.json) -- code_hash
+# values are identical to devnet's own (same compiled binaries, and
+# code_hash is purely a function of the binary bytes), only the
+# cell_dep outpoints and the registry's own Type ID identity differ,
+# since those are tied to which chain actually holds the deploying
+# transactions.
+if System.get_env("CKB_NETWORK") == "testnet" do
+  config :web, :ckb,
+    rpc_url: "https://testnet.ckb.dev/",
+    sighash_code_hash: "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8",
+    sighash_dep_group: %{tx_hash: "0xf8de3bb47d055cdf460d93a2a6e1b05f7432f9777c8c474abf4eec1d4aee5d37", index: 0},
+    mpesa_escrow: %{
+      code_hash: "0x74e8b52b2043efe2386a5f838a0a0ce44d0d087025e95a575eb40ba38b54e0f9",
+      hash_type: "data1",
+      cell_dep: %{tx_hash: "0xa5a85f5cc3a1977d8e244e01681312a7c62d7a9b4c09eafa8d207a81a75083c2", index: 1}
+    },
+    claims_registry: %{
+      code_hash: "0x5cfd31a4a0775052dd45b85637cabd9086b5f7f5d257227153b583d72f3c1000",
+      hash_type: "data1",
+      cell_dep: %{tx_hash: "0xa5a85f5cc3a1977d8e244e01681312a7c62d7a9b4c09eafa8d207a81a75083c2", index: 0},
+      type_hash: "0x2326d50a69f78d2abb8d097a6e95c90af12a30050c05e8b659c195e242d65341",
+      type_args: "0x674daf2952fd3313fa0af28de346d9fc52ff865db47473af4e4f0e17dfdc783b",
+      genesis_out_point: %{tx_hash: "0x84f46628f263e199dcc4eb726670bb5fbb8e8dc1272ae726cfad15cd45eecf3f", index: 0}
+    },
+    offer_guard: %{
+      code_hash: "0x13c3c2b25bda33139e4d0ba52868b478d98d47c166d979e18898a3b8cfa786ba",
+      hash_type: "data1",
+      cell_dep: %{tx_hash: "0xa5a85f5cc3a1977d8e244e01681312a7c62d7a9b4c09eafa8d207a81a75083c2", index: 2}
+    },
+    always_success: %{
+      code_hash: "0xfd5c9693329386bf61812189788840c4438240b2ec536385a51e473c48727d1a",
+      hash_type: "data1",
+      cell_dep: %{tx_hash: "0x7a741a9f7c6a6fa0a5ae22e102cd59f0b91189785ad61efd98396e901a7dd625", index: 0}
+    },
+    verifier_private_key:
+      System.get_env(
+        "BITSHADA_VERIFIER_PRIVATE_KEY",
+        "0xf772d0917cd21824b6259816aa2da2a9675e7ff25b8a5e41703c34cb6d05a30e"
+      )
+end
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :web, WebWeb.Endpoint,
