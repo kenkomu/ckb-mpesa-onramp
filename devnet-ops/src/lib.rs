@@ -288,7 +288,7 @@ pub fn get_one_cell(lock: &Script) -> (OutPoint, u64) {
     let objects = result["objects"].as_array().cloned().unwrap_or_default();
     let obj = objects
         .into_iter()
-        .find(|o| o["output"]["type"].is_null())
+        .find(is_plain_funding_cell)
         .unwrap_or_else(|| panic!("no live type-less cells at this lock -- let the miner run longer"));
     let tx_hash = hex32(obj["out_point"]["tx_hash"].as_str().unwrap());
     let index = u32::from_str_radix(obj["out_point"]["index"].as_str().unwrap().trim_start_matches("0x"), 16).unwrap();
@@ -297,11 +297,30 @@ pub fn get_one_cell(lock: &Script) -> (OutPoint, u64) {
     (op, capacity)
 }
 
-/// Collects live, type-less cells at `lock` until their summed capacity
-/// reaches `need`, or panics if the devnet hasn't mined enough yet --
-/// callers should just let the miner run longer and retry. Needed
-/// whenever a single ~2010 CKB cellbase cell isn't enough on its own
-/// (e.g. funding a data cell for a real contract binary).
+/// True for a cell this crate is safe to spend as plain funding: no type
+/// script AND no data. Filtering on the type script alone isn't enough --
+/// a deployed contract binary (deploy.rs, deploy_always_success.rs) is
+/// itself a large-data, TYPE-LESS cell at this same deploying key's lock,
+/// so it looks exactly like ordinary spendable change to a scanner that
+/// only checks for a type script. Confirmed the hard way on a real
+/// testnet deployment: create_offer's and fund_buyer's own funding steps
+/// each silently picked up and SPENT one of the just-deployed contract
+/// binaries (the claims-registry and mpesa-escrow cells) as if it were
+/// spare capacity, permanently destroying both cell_deps everything else
+/// depends on. Never happened on devnet, which always has enough plain
+/// (empty-data) cellbase cells that the scanner never had to reach that
+/// far down the list.
+fn is_plain_funding_cell(obj: &Value) -> bool {
+    obj["output"]["type"].is_null() && obj["output_data"].as_str() == Some("0x")
+}
+
+/// Collects live, type-less, EMPTY-DATA cells at `lock` until their
+/// summed capacity reaches `need`, or panics if the devnet hasn't mined
+/// enough yet -- callers should just let the miner run longer and retry.
+/// Needed whenever a single ~2010 CKB cellbase cell isn't enough on its
+/// own (e.g. funding a data cell for a real contract binary). See
+/// `is_plain_funding_cell` for why the data check matters as much as the
+/// type-script one.
 pub fn collect_cells(lock: &Script, need: u64) -> (Vec<(OutPoint, u64)>, u64) {
     let script_json = json!({
         "code_hash": format!("0x{}", hex::encode(lock.code_hash().raw_data())),
@@ -316,7 +335,7 @@ pub fn collect_cells(lock: &Script, need: u64) -> (Vec<(OutPoint, u64)>, u64) {
         if total >= need {
             break;
         }
-        if !obj["output"]["type"].is_null() {
+        if !is_plain_funding_cell(&obj) {
             continue;
         }
         let tx_hash = hex32(obj["out_point"]["tx_hash"].as_str().unwrap());
