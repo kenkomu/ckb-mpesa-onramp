@@ -1,9 +1,12 @@
 /* See the Tailwind configuration guide for advanced usage
    https://tailwindcss.com/docs/configuration */
 
+/* Must be the first @import in the file -- CSS only allows @charset
+   before @import rules, so this has to precede even the tailwindcss
+   import or the browser silently drops it. */
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss" source(none);
 @import "phoenix-colocated/web/colocated.css";
-@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 @source "../css";
 @source "../js";
 @source "../../lib/web_web";
