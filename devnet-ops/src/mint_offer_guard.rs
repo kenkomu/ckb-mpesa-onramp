@@ -32,7 +32,7 @@ fn ownership_message(recipient_hash: &[u8; 32]) -> [u8; 33] {
 }
 
 fn load_or_create_verifier(manifest_dir: &str) -> EthSigner {
-    let path = Path::new(manifest_dir).join("verifier_key.txt");
+    let path = devnet_ops::data_dir(manifest_dir).join("verifier_key.txt");
     if let Ok(text) = fs::read_to_string(&path) {
         let hex_key = text.trim().strip_prefix("0x").unwrap_or(text.trim()).to_string();
         let bytes = hex::decode(hex_key).expect("valid hex in verifier_key.txt");

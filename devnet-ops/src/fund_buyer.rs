@@ -11,13 +11,12 @@ use ckb_types::{
 use devnet_ops::*;
 use k256::ecdsa::SigningKey;
 use std::fs;
-use std::path::Path;
 
 fn main() {
     let (seller_blake160, seller_key) = load_key(env!("CARGO_MANIFEST_DIR"));
     let seller_lock = sighash_lock(&seller_blake160);
 
-    let buyer_key_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("buyer_key.txt");
+    let buyer_key_path = devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("buyer_key.txt");
     let text = fs::read_to_string(&buyer_key_path)
         .expect("read buyer_key.txt (run claim_offer once first so it generates one)");
     let hex_key = text.trim().strip_prefix("0x").unwrap_or(text.trim()).to_string();

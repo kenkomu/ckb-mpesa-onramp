@@ -28,7 +28,7 @@ fn claim_message(tx_id_hash: &[u8; 32], recipient_hash: &[u8; 32], amount: i64) 
 }
 
 fn load_or_create_buyer(manifest_dir: &str) -> ([u8; 20], SigningKey) {
-    let path = Path::new(manifest_dir).join("buyer_key.txt");
+    let path = devnet_ops::data_dir(manifest_dir).join("buyer_key.txt");
     if let Ok(text) = fs::read_to_string(&path) {
         let hex_key = text.trim().strip_prefix("0x").unwrap_or(text.trim()).to_string();
         let bytes = hex::decode(hex_key).expect("valid hex in buyer_key.txt");
