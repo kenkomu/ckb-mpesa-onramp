@@ -132,23 +132,32 @@ defmodule WebWeb.OffersLive do
 
   def render(assigns) do
     ~H"""
-    <div id="wallet" phx-hook="Wallet" class="mx-auto max-w-5xl space-y-6">
-      <div class="flex flex-wrap items-start justify-between gap-4">
+    <div id="wallet" phx-hook="Wallet" class="space-y-8">
+      <div class="flex flex-wrap items-start justify-between gap-5">
         <div>
-          <h1 class="text-2xl font-bold">Bitshada -- Open offers</h1>
-          <p class="text-sm opacity-70">Buy and sell CKB for KES, escrowed on-chain -- no database, no custodian.</p>
+          <div class="font-mono text-xs uppercase tracking-widest text-primary font-semibold mb-1">
+            Marketplace
+          </div>
+          <h1 class="font-display text-3xl font-bold tracking-tight">Open offers</h1>
+          <p class="text-sm text-base-content/70 mt-1 max-w-md">
+            Buy and sell CKB for KES, escrowed on-chain &mdash; no database, no custodian.
+          </p>
         </div>
 
-        <div class="card bg-base-200 shadow-sm">
-          <div class="card-body py-3 px-4">
+        <div class="card bg-base-200 border border-base-300 shadow-sm">
+          <div class="card-body py-3 px-4 min-w-56">
             <div :if={@wallet} class="flex items-center gap-3">
-              <div class="badge badge-success badge-sm">connected</div>
-              <div class="text-right">
-                <div class="font-mono text-xs opacity-70">{short_hash(@wallet.address)}</div>
-                <div class="font-semibold">{format_ckb(@wallet.balance_ckb)} CKB</div>
+              <span class="relative flex size-2.5">
+                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60">
+                </span>
+                <span class="relative inline-flex size-2.5 rounded-full bg-success"></span>
+              </span>
+              <div class="text-right ml-auto">
+                <div class="font-mono text-xs text-base-content/60">{short_hash(@wallet.address)}</div>
+                <div class="font-mono font-semibold tabular-nums">{format_ckb(@wallet.balance_ckb)} CKB</div>
               </div>
             </div>
-            <div :if={@wallet == nil and @wallet_error == nil} class="flex items-center gap-2 text-sm opacity-70">
+            <div :if={@wallet == nil and @wallet_error == nil} class="flex items-center gap-2 text-sm text-base-content/60">
               <span class="loading loading-spinner loading-xs"></span> Connecting wallet...
             </div>
             <div :if={@wallet_error} class="text-sm text-error">Wallet unavailable: {@wallet_error}</div>
@@ -158,7 +167,7 @@ defmodule WebWeb.OffersLive do
 
       <div :if={@notice} class="alert alert-success shadow-sm">
         <.icon name="hero-check-circle" class="size-5" />
-        <span class="font-mono text-sm">{@notice}</span>
+        <span class="font-mono text-sm break-all">{@notice}</span>
       </div>
       <div :if={@tx_error} class="alert alert-error shadow-sm">
         <.icon name="hero-exclamation-triangle" class="size-5" />
@@ -169,44 +178,69 @@ defmodule WebWeb.OffersLive do
         <span class="text-sm">Could not reach the CKB node: {inspect(@error)}</span>
       </div>
 
-      <div class="card bg-base-200 shadow-sm">
+      <div class="card bg-base-200 border border-base-300 shadow-sm">
         <div class="card-body">
-          <h2 class="card-title text-base">Sell CKB for KES</h2>
-          <.form :if={@wallet} for={@create_form} phx-submit="create_offer" class="flex flex-wrap items-end gap-3">
+          <h2 class="font-display text-lg font-semibold">Sell CKB for KES</h2>
+          <.form :if={@wallet} for={@create_form} phx-submit="create_offer" class="flex flex-wrap items-end gap-3 mt-1">
             <label class="flex-1 min-w-56 form-control">
-              <span class="label-text text-xs opacity-70">Recipient hash (0x + 64 hex)</span>
-              <input type="text" name="recipient_hash" class="input input-bordered input-sm w-full" placeholder="0x0707...0707" />
+              <span class="label-text text-xs text-base-content/60 mb-1">Recipient hash (0x + 64 hex)</span>
+              <input
+                type="text"
+                name="recipient_hash"
+                class="input input-bordered input-sm w-full font-mono"
+                placeholder="0x0707...0707"
+              />
             </label>
             <label class="form-control">
-              <span class="label-text text-xs opacity-70">Amount (KES minor units)</span>
-              <input type="text" name="amount" class="input input-bordered input-sm w-32" placeholder="25000" />
+              <span class="label-text text-xs text-base-content/60 mb-1">Amount (KES minor units)</span>
+              <input type="text" name="amount" class="input input-bordered input-sm w-32 font-mono" placeholder="25000" />
             </label>
             <.button type="submit" disabled={@busy == :create} phx-disable-with="Creating..." class="btn-primary">
               <span :if={@busy == :create} class="loading loading-spinner loading-xs"></span>
               {if @busy == :create, do: "Creating...", else: "Create offer"}
             </.button>
           </.form>
-          <p :if={@wallet == nil} class="text-sm opacity-60">Connect a wallet to create an offer.</p>
+          <p :if={@wallet == nil} class="text-sm text-base-content/60 mt-1">Connect a wallet to create an offer.</p>
         </div>
       </div>
 
-      <div :if={@error == nil and @offers == []} class="text-center opacity-60 py-12">
-        No open offers right now -- create one above.
+      <div :if={@error == nil and @offers == []} class="flex flex-col items-center gap-2 text-center py-16">
+        <.icon name="hero-inbox" class="size-8 text-base-content/30" />
+        <p class="text-base-content/60">No open offers right now &mdash; create one above.</p>
       </div>
 
       <div :if={@offers != []} class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div :for={offer <- @offers} class="card bg-base-200 shadow-sm">
+        <div
+          :for={offer <- @offers}
+          class="card bg-base-200 border border-base-300 shadow-sm hover:shadow-md hover:border-primary/40 transition"
+        >
           <div class="card-body gap-2">
             <div class="flex items-center justify-between">
-              <span class={["badge", offer.status == :open && "badge-success", offer.status == :reserved && "badge-warning"]}>
+              <span class={[
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-mono font-semibold",
+                offer.status == :open && "bg-success/15 text-success",
+                offer.status == :reserved && "bg-warning/15 text-warning"
+              ]}>
+                <span class={[
+                  "size-1.5 rounded-full",
+                  offer.status == :open && "bg-success",
+                  offer.status == :reserved && "bg-warning"
+                ]}>
+                </span>
                 {offer.status}
               </span>
-              <span class="text-xs opacity-50 font-mono">{short_hash(offer.out_point["tx_hash"])}:{offer.out_point["index"]}</span>
+              <span class="text-xs text-base-content/50 font-mono">
+                {short_hash(offer.out_point["tx_hash"])}:{offer.out_point["index"]}
+              </span>
             </div>
 
-            <div class="text-2xl font-bold">{format_amount(offer.amount)} <span class="text-sm font-normal opacity-60">KES</span></div>
-            <div class="text-sm opacity-70">{format_capacity(offer.capacity_shannon)} locked in escrow</div>
-            <div class="text-xs opacity-50 font-mono">Recipient: {short_hash(offer.recipient_hash)}</div>
+            <div class="font-mono text-2xl font-bold tabular-nums">
+              {format_amount(offer.amount)} <span class="text-sm font-normal text-base-content/60">KES</span>
+            </div>
+            <div class="text-sm text-base-content/70 font-mono tabular-nums">
+              {format_capacity(offer.capacity_shannon)} locked in escrow
+            </div>
+            <div class="text-xs text-base-content/50 font-mono">Recipient: {short_hash(offer.recipient_hash)}</div>
 
             <div class="card-actions mt-2">
               <.button
@@ -235,7 +269,7 @@ defmodule WebWeb.OffersLive do
               </.button>
               <div
                 :if={offer.status == :reserved && (@wallet == nil || offer.reserved_by_lock_hash != @wallet.lock_hash)}
-                class="text-xs opacity-50 w-full text-center py-1"
+                class="text-xs text-base-content/50 w-full text-center py-1"
               >
                 Reserved by another buyer
               </div>
@@ -245,7 +279,9 @@ defmodule WebWeb.OffersLive do
       </div>
 
       <div class="flex justify-center pt-2">
-        <.button phx-click="refresh" phx-disable-with="Refreshing..." class="btn-ghost btn-sm">Refresh</.button>
+        <.button phx-click="refresh" phx-disable-with="Refreshing..." class="btn-ghost btn-sm">
+          <.icon name="hero-arrow-path" class="size-4" /> Refresh
+        </.button>
       </div>
     </div>
     """

@@ -3,6 +3,7 @@
 
 @import "tailwindcss" source(none);
 @import "phoenix-colocated/web/colocated.css";
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 @source "../css";
 @source "../js";
 @source "../../lib/web_web";
@@ -18,37 +19,39 @@
   themes: false;
 }
 
-/* daisyUI theme plugin.
-  We ship with two themes, a light one inspired on Phoenix colors and a dark one inspired
-  on Elixir colors. Build your own at: https://daisyui.com/theme-generator/ */
+/* Bitshada's own theme -- matches the palette used in the project's grant
+   proposal and pilot-recruitment pages for one consistent visual identity
+   across every touchpoint: a teal-green accent (the escrow/trust color)
+   and a warm amber secondary (the KES/money color), on a paper/ink base
+   rather than the Phoenix scaffold's default orange/purple. */
 @plugin "daisyui/packages/bundle/daisyui-theme" {
   name: "dark";
   default: false;
   prefersdark: true;
   color-scheme: "dark";
-  --color-base-100: oklch(30.33% 0.016 252.42);
-  --color-base-200: oklch(25.26% 0.014 253.1);
-  --color-base-300: oklch(20.15% 0.012 254.09);
-  --color-base-content: oklch(97.807% 0.029 256.847);
-  --color-primary: oklch(58% 0.233 277.117);
-  --color-primary-content: oklch(96% 0.018 272.314);
-  --color-secondary: oklch(58% 0.233 277.117);
-  --color-secondary-content: oklch(96% 0.018 272.314);
-  --color-accent: oklch(60% 0.25 292.717);
-  --color-accent-content: oklch(96% 0.016 293.756);
-  --color-neutral: oklch(37% 0.044 257.287);
-  --color-neutral-content: oklch(98% 0.003 247.858);
-  --color-info: oklch(58% 0.158 241.966);
-  --color-info-content: oklch(97% 0.013 236.62);
-  --color-success: oklch(60% 0.118 184.704);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
+  --color-base-100: #0d1512;
+  --color-base-200: #141e19;
+  --color-base-300: #223029;
+  --color-base-content: #e9f2ec;
+  --color-primary: #3fc491;
+  --color-primary-content: #08140f;
+  --color-secondary: #dd9d51;
+  --color-secondary-content: #241503;
+  --color-accent: #7fe0b8;
+  --color-accent-content: #08140f;
+  --color-neutral: #e9f2ec;
+  --color-neutral-content: #0d1512;
+  --color-info: #6cb6e8;
+  --color-info-content: #06131f;
+  --color-success: #3fc491;
+  --color-success-content: #08140f;
+  --color-warning: #dd9d51;
+  --color-warning-content: #241503;
+  --color-error: #e07a6b;
+  --color-error-content: #260604;
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.625rem;
   --size-selector: 0.21875rem;
   --size-field: 0.21875rem;
   --border: 1.5px;
@@ -61,34 +64,49 @@
   default: true;
   prefersdark: false;
   color-scheme: "light";
-  --color-base-100: oklch(98% 0 0);
-  --color-base-200: oklch(96% 0.001 286.375);
-  --color-base-300: oklch(92% 0.004 286.32);
-  --color-base-content: oklch(21% 0.006 285.885);
-  --color-primary: oklch(70% 0.213 47.604);
-  --color-primary-content: oklch(98% 0.016 73.684);
-  --color-secondary: oklch(55% 0.027 264.364);
-  --color-secondary-content: oklch(98% 0.002 247.839);
-  --color-accent: oklch(0% 0 0);
-  --color-accent-content: oklch(100% 0 0);
-  --color-neutral: oklch(44% 0.017 285.786);
-  --color-neutral-content: oklch(98% 0 0);
-  --color-info: oklch(62% 0.214 259.815);
-  --color-info-content: oklch(97% 0.014 254.604);
-  --color-success: oklch(70% 0.14 182.503);
-  --color-success-content: oklch(98% 0.014 180.72);
-  --color-warning: oklch(66% 0.179 58.318);
-  --color-warning-content: oklch(98% 0.022 95.277);
-  --color-error: oklch(58% 0.253 17.585);
-  --color-error-content: oklch(96% 0.015 12.422);
-  --radius-selector: 0.25rem;
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
+  --color-base-100: #f2f5f0;
+  --color-base-200: #ffffff;
+  --color-base-300: #b9c7bd;
+  --color-base-content: #12201b;
+  --color-primary: #1e8f6f;
+  --color-primary-content: #ffffff;
+  --color-secondary: #a86a26;
+  --color-secondary-content: #ffffff;
+  --color-accent: #146a51;
+  --color-accent-content: #ffffff;
+  --color-neutral: #12201b;
+  --color-neutral-content: #f2f5f0;
+  --color-info: #1d6fa5;
+  --color-info-content: #ffffff;
+  --color-success: #146a51;
+  --color-success-content: #ffffff;
+  --color-warning: #8a5a1e;
+  --color-warning-content: #ffffff;
+  --color-error: #a5382a;
+  --color-error-content: #ffffff;
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.625rem;
   --size-selector: 0.21875rem;
   --size-field: 0.21875rem;
   --border: 1.5px;
   --depth: 1;
   --noise: 0;
+}
+
+/* Same type system as the grant proposal / pilot pages: a serif for
+   headings gives the marketplace a bit of editorial weight, a plain
+   humanist sans for body copy, and monospace specifically for the
+   things that are genuinely data -- tx hashes, addresses, amounts --
+   so they read as exact values rather than prose. */
+body {
+  font-family: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+}
+h1, h2, h3, .font-display {
+  font-family: "Source Serif 4", ui-serif, Georgia, serif;
+}
+.font-mono, code, .mono {
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
 }
 
 /* Add variants based on LiveView classes */
