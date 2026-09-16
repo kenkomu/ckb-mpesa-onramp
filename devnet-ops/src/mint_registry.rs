@@ -13,14 +13,13 @@ use ckb_types::{
 use devnet_ops::*;
 use serde_json::json;
 use std::fs;
-use std::path::Path;
 
 fn main() {
     let (blake160, signing_key) = load_key(env!("CARGO_MANIFEST_DIR"));
     let lock = sighash_lock(&blake160);
 
     let deployed: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deployed.json"))
+        &fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("deployed.json"))
             .expect("read deployed.json (run `cargo run --bin deploy` first)"),
     )
     .unwrap();
@@ -28,7 +27,7 @@ fn main() {
     let registry_index = deployed["claims_registry_index"].as_u64().unwrap() as u32;
 
     let registry_binary = fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry"),
+        devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry"),
     )
     .expect("read claims-registry binary");
     let registry_code_hash = blake2b_256(&registry_binary);
@@ -85,7 +84,7 @@ fn main() {
             "args": format!("0x{}", hex::encode(type_id_args)),
         },
     });
-    let out_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("registry.json");
+    let out_path = devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("registry.json");
     fs::write(&out_path, serde_json::to_string_pretty(&result).unwrap()).unwrap();
     println!("Wrote {}", out_path.display());
 }

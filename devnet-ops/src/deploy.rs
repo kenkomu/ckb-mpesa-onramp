@@ -91,7 +91,7 @@ fn main() {
         "offer_guard_index": 2,
         "change_index": 3,
     });
-    let out_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("deployed.json");
+    let out_path = devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("deployed.json");
     fs::write(&out_path, serde_json::to_string_pretty(&result).unwrap()).unwrap();
     println!("Wrote {}", out_path.display());
 }

@@ -21,3 +21,7 @@
 /devnet-ops/offer.json
 /devnet-ops/reserve.json
 /devnet-ops/deployed_always_success.json
+# Testnet (and any other non-devnet) run's own state directory -- see
+# CKB_DATA_DIR in devnet-ops/src/lib.rs's data_dir(). Real testnet key
+# and tx-hash state, kept out of git the same way the devnet files are.
+/devnet-ops/testnet_data/

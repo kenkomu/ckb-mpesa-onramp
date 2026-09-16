@@ -60,7 +60,7 @@ fn main() {
     wait_for_tx(&tx_hash, 60);
     println!("Committed.");
 
-    let out_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("deployed_always_success.json");
+    let out_path = devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("deployed_always_success.json");
     fs::write(&out_path, json!({"tx_hash": tx_hash, "index": 0}).to_string()).unwrap();
     println!("Wrote {}", out_path.display());
 }

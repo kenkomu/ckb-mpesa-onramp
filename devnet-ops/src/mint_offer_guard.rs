@@ -53,13 +53,13 @@ fn main() {
     println!("Verifier (trusted) Ethereum-style address: 0x{}", hex::encode(verifier.address()));
 
     let deployed: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deployed.json")).expect("read deployed.json"),
+        &fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("deployed.json")).expect("read deployed.json"),
     )
     .unwrap();
     let deploy_tx_hash = deployed["tx_hash"].as_str().unwrap().to_string();
     let guard_index = deployed["offer_guard_index"].as_u64().unwrap() as u32;
 
-    let guard_binary = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/offer-guard"))
+    let guard_binary = fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/offer-guard"))
         .expect("read offer-guard binary");
     let guard_code_hash = blake2b_256(&guard_binary);
 
@@ -122,7 +122,7 @@ fn main() {
         },
         "guard_type_hash": format!("0x{}", hex::encode(guard_type_hash.as_slice())),
     });
-    let out_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("offer_guard.json");
+    let out_path = devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("offer_guard.json");
     fs::write(&out_path, serde_json::to_string_pretty(&result).unwrap()).unwrap();
     println!("Wrote {}", out_path.display());
 }

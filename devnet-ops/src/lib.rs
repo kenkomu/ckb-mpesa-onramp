@@ -21,6 +21,18 @@ pub fn rpc_url() -> String {
     std::env::var("CKB_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8114".to_string())
 }
 
+/// Where every binary's own state files (deployed.json, registry.json,
+/// offer.json, ...) live -- defaults to the crate root (devnet's existing
+/// behavior), overridable via `CKB_DATA_DIR` so a testnet run's state
+/// never overwrites the devnet run's own files. `manifest_dir` is always
+/// `env!("CARGO_MANIFEST_DIR")` from the calling binary.
+pub fn data_dir(manifest_dir: &str) -> std::path::PathBuf {
+    match std::env::var("CKB_DATA_DIR") {
+        Ok(dir) => std::path::PathBuf::from(dir),
+        Err(_) => std::path::PathBuf::from(manifest_dir),
+    }
+}
+
 /// The standard secp256k1_blake160_sighash_all system script's own type
 /// hash -- fixed across all CKB chains (mainnet/testnet/dev), since it's
 /// part of the genesis block's own system cells and dev chains reuse the
@@ -228,6 +240,7 @@ pub fn hex32(s: &str) -> [u8; 32] {
 pub fn load_key(manifest_dir: &str) -> ([u8; 20], SigningKey) {
     let file_name = std::env::var("CKB_KEY_FILE").unwrap_or_else(|_| "devnet_key.txt".to_string());
     let text = std::fs::read_to_string(std::path::Path::new(manifest_dir).join(&file_name))
+        .or_else(|_| std::fs::read_to_string(data_dir(manifest_dir).join(&file_name)))
         .unwrap_or_else(|_| panic!("read {file_name} (run `cargo run --bin gen_key` first if missing)"));
     let mut private_key_hex = None;
     let mut blake160_hex = None;
@@ -302,7 +315,10 @@ pub fn collect_cells(lock: &Script, need: u64) -> (Vec<(OutPoint, u64)>, u64) {
         total += capacity;
     }
     if total < need {
-        panic!("not enough mined capacity yet: have {total} shannon, need {need} shannon -- let the miner run longer");
+        panic!(
+            "not enough spendable capacity at this lock: have {total} shannon, need {need} shannon \
+             -- on devnet, let the miner run longer; on testnet, claim more from the faucet"
+        );
     }
     (collected, total)
 }

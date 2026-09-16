@@ -52,7 +52,7 @@ fn main() {
     let buyer_lock = sighash_lock(&buyer_blake160);
 
     let verifier = {
-        let text = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("verifier_key.txt"))
+        let text = fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("verifier_key.txt"))
             .expect("read verifier_key.txt (run mint_offer_guard first)");
         let hex_key = text.trim().strip_prefix("0x").unwrap_or(text.trim()).to_string();
         let bytes = hex::decode(hex_key).unwrap();
@@ -60,21 +60,21 @@ fn main() {
     };
 
     let deployed: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deployed.json")).unwrap(),
+        &fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("deployed.json")).unwrap(),
     )
     .unwrap();
     let registry: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("registry.json")).unwrap(),
+        &fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("registry.json")).unwrap(),
     )
     .unwrap();
     let always_success: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deployed_always_success.json")).unwrap(),
+        &fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("deployed_always_success.json")).unwrap(),
     )
     .unwrap();
     let always_success_tx_hash = always_success["tx_hash"].as_str().unwrap().to_string();
     let always_success_index = always_success["index"].as_u64().unwrap() as u32;
     let offer: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("offer.json")).unwrap())
+        serde_json::from_str(&fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("offer.json")).unwrap())
             .unwrap();
 
     let deploy_tx_hash = deployed["tx_hash"].as_str().unwrap().to_string();
@@ -82,7 +82,7 @@ fn main() {
     let registry_index = deployed["claims_registry_index"].as_u64().unwrap() as u32;
     let guard_index = deployed["offer_guard_index"].as_u64().unwrap() as u32;
 
-    let escrow_binary = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/mpesa-escrow")).unwrap();
+    let escrow_binary = fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/mpesa-escrow")).unwrap();
     let escrow_code_hash = blake2b_256(&escrow_binary);
     let escrow_args_hex = offer["escrow_lock_script"]["args"].as_str().unwrap().to_string();
     let escrow_lock_script = Script::new_builder()
@@ -98,7 +98,7 @@ fn main() {
     let guard_type_hash_hex = offer["guard_type_hash"].as_str().unwrap().to_string();
     let guard_type_script = {
         let guard_binary =
-            fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/offer-guard")).unwrap();
+            fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/offer-guard")).unwrap();
         let guard_code_hash = blake2b_256(&guard_binary);
         let args_hex = offer["guard_type_script"]["args"].as_str().unwrap().to_string();
         Script::new_builder()
@@ -125,7 +125,7 @@ fn main() {
     // from whichever cell is actually live right now (the original offer
     // cell if RESERVE hasn't run yet, or the reserved cell if it has) --
     // never assumed, since RESERVE's own small fee already shrank it.
-    let reserve_state_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("reserve.json");
+    let reserve_state_path = devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("reserve.json");
     let reserve_tx_hash = if let Ok(text) = fs::read_to_string(&reserve_state_path) {
         let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
         let hash = saved["reserve_tx_hash"].as_str().unwrap().to_string();
@@ -228,7 +228,7 @@ fn main() {
             .build()
     };
     let registry_type_script = {
-        let registry_binary = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry")).unwrap();
+        let registry_binary = fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry")).unwrap();
         let registry_code_hash = blake2b_256(&registry_binary);
         let args_hex = registry["registry_type_script"]["args"].as_str().unwrap().to_string();
         Script::new_builder()

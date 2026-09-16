@@ -28,7 +28,6 @@ use ckb_types::{
 use devnet_ops::*;
 use serde_json::json;
 use std::fs;
-use std::path::Path;
 
 const AMOUNT: i64 = 25_000; // KES minor units, matching the claim step's own constant
 
@@ -44,11 +43,11 @@ fn main() {
     let lock = sighash_lock(&blake160);
 
     let deployed: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("deployed.json")).expect("read deployed.json"),
+        &fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("deployed.json")).expect("read deployed.json"),
     )
     .unwrap();
     let registry: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("registry.json")).expect("read registry.json"),
+        &fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("registry.json")).expect("read registry.json"),
     )
     .unwrap();
 
@@ -56,10 +55,10 @@ fn main() {
     let escrow_index = deployed["mpesa_escrow_index"].as_u64().unwrap() as u32;
     let guard_index = deployed["offer_guard_index"].as_u64().unwrap() as u32;
 
-    let escrow_binary = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/mpesa-escrow"))
+    let escrow_binary = fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/mpesa-escrow"))
         .expect("read mpesa-escrow binary");
     let escrow_code_hash = blake2b_256(&escrow_binary);
-    let guard_binary = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/offer-guard"))
+    let guard_binary = fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/offer-guard"))
         .expect("read offer-guard binary");
     let guard_code_hash = blake2b_256(&guard_binary);
 
@@ -67,7 +66,7 @@ fn main() {
     // earlier, free-standing OfferGuard mint) -- a Verifier's identity
     // doesn't depend on which specific cell later carries the badge.
     let verifier = {
-        let text = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("verifier_key.txt"))
+        let text = fs::read_to_string(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("verifier_key.txt"))
             .expect("read verifier_key.txt (run mint_offer_guard once first so it generates one)");
         let hex_key = text.trim().strip_prefix("0x").unwrap_or(text.trim()).to_string();
         let bytes = hex::decode(hex_key).unwrap();
@@ -167,7 +166,7 @@ fn main() {
         },
         "guard_type_hash": format!("0x{}", hex::encode(guard_type_hash)),
     });
-    let out_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("offer.json");
+    let out_path = devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("offer.json");
     fs::write(&out_path, serde_json::to_string_pretty(&result).unwrap()).unwrap();
     println!("Wrote {}", out_path.display());
 }
