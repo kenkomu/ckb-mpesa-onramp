@@ -13,6 +13,7 @@ use ckb_types::{
 use devnet_ops::*;
 use serde_json::json;
 use std::fs;
+use std::path::Path;
 
 fn main() {
     let (blake160, signing_key) = load_key(env!("CARGO_MANIFEST_DIR"));
@@ -27,7 +28,7 @@ fn main() {
     let registry_index = deployed["claims_registry_index"].as_u64().unwrap() as u32;
 
     let registry_binary = fs::read(
-        devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry"),
     )
     .expect("read claims-registry binary");
     let registry_code_hash = blake2b_256(&registry_binary);

@@ -14,6 +14,7 @@ use ckb_types::{
 use devnet_ops::*;
 use serde_json::json;
 use std::fs;
+use std::path::Path;
 
 fn main() {
     let (blake160, signing_key) = load_key(env!("CARGO_MANIFEST_DIR"));
@@ -28,7 +29,7 @@ fn main() {
     let always_success_index = always_success["index"].as_u64().unwrap() as u32;
 
     let always_success_binary =
-        fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/always-success")).unwrap();
+        fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/always-success")).unwrap();
     let always_success_code_hash = blake2b_256(&always_success_binary);
     let always_success_lock = Script::new_builder()
         .code_hash(always_success_code_hash.pack())
@@ -43,7 +44,7 @@ fn main() {
     let deploy_tx_hash = deployed["tx_hash"].as_str().unwrap().to_string();
     let registry_index = deployed["claims_registry_index"].as_u64().unwrap() as u32;
     let registry_binary =
-        fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry")).unwrap();
+        fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry")).unwrap();
     let registry_code_hash = blake2b_256(&registry_binary);
 
     let (funding_out_point, funding_capacity) = get_one_cell(&lock);

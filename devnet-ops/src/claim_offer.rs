@@ -82,7 +82,7 @@ fn main() {
     let registry_index = deployed["claims_registry_index"].as_u64().unwrap() as u32;
     let guard_index = deployed["offer_guard_index"].as_u64().unwrap() as u32;
 
-    let escrow_binary = fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/mpesa-escrow")).unwrap();
+    let escrow_binary = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/mpesa-escrow")).unwrap();
     let escrow_code_hash = blake2b_256(&escrow_binary);
     let escrow_args_hex = offer["escrow_lock_script"]["args"].as_str().unwrap().to_string();
     let escrow_lock_script = Script::new_builder()
@@ -98,7 +98,7 @@ fn main() {
     let guard_type_hash_hex = offer["guard_type_hash"].as_str().unwrap().to_string();
     let guard_type_script = {
         let guard_binary =
-            fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/offer-guard")).unwrap();
+            fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/offer-guard")).unwrap();
         let guard_code_hash = blake2b_256(&guard_binary);
         let args_hex = offer["guard_type_script"]["args"].as_str().unwrap().to_string();
         Script::new_builder()
@@ -228,7 +228,7 @@ fn main() {
             .build()
     };
     let registry_type_script = {
-        let registry_binary = fs::read(devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry")).unwrap();
+        let registry_binary = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release/claims-registry")).unwrap();
         let registry_code_hash = blake2b_256(&registry_binary);
         let args_hex = registry["registry_type_script"]["args"].as_str().unwrap().to_string();
         Script::new_builder()
