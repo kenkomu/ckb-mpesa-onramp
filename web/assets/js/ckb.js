@@ -95,6 +95,20 @@ async function getSigner() {
   return { signer, client, config };
 }
 
+/**
+ * Turns a human-entered identifier (an M-Pesa number, for this pilot --
+ * any real per-user identifier would work the same way) into the
+ * 32-byte recipient_hash the contract actually stores. Real production
+ * would derive this from a verified phone number; for now it's a plain
+ * client-side SHA-256, deliberately not asking a tester to construct or
+ * paste a raw hex hash themselves.
+ */
+export async function hashIdentifier(text) {
+  const bytes = new TextEncoder().encode(text.trim());
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return "0x" + [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export async function walletInfo() {
   const { signer, config } = await getSigner();
   const addressObj = await signer.getAddressObjSecp256k1();

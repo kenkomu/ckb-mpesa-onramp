@@ -24,7 +24,7 @@ defmodule WebWeb.OffersLive do
     {:ok,
      socket
      |> assign(wallet: nil, wallet_error: nil, busy: nil, notice: nil, tx_error: nil)
-     |> assign(create_form: to_form(%{"recipient_hash" => "", "amount" => ""}))
+     |> assign(create_form: to_form(%{"identifier" => "", "amount" => ""}))
      |> load_offers()}
   end
 
@@ -40,15 +40,15 @@ defmodule WebWeb.OffersLive do
     {:noreply, assign(socket, wallet_error: message)}
   end
 
-  def handle_event("create_offer", %{"recipient_hash" => recipient_hash, "amount" => amount}, socket) do
-    with {:ok, recipient_hash} <- validate_hash32(recipient_hash),
-         {amount, ""} <- Integer.parse(amount) do
+  def handle_event("create_offer", %{"identifier" => identifier, "amount" => amount_kes}, socket) do
+    with {:ok, identifier} <- validate_identifier(identifier),
+         {:ok, minor_units} <- parse_kes(amount_kes) do
       {:noreply,
        socket
        |> assign(busy: :create, notice: nil, tx_error: nil)
-       |> push_event("run_create_offer", %{recipient_hash: recipient_hash, amount: amount})}
+       |> push_event("run_create_offer", %{identifier: identifier, amount: minor_units})}
     else
-      _ -> {:noreply, assign(socket, tx_error: "Recipient hash must be 0x followed by 64 hex characters, and amount a whole number.")}
+      _ -> {:noreply, assign(socket, tx_error: "Enter an M-Pesa number (or any test value) and an amount in KES.")}
     end
   end
 
@@ -121,18 +121,37 @@ defmodule WebWeb.OffersLive do
     }
   end
 
-  defp validate_hash32("0x" <> hex) when byte_size(hex) == 64 do
-    case Base.decode16(hex, case: :mixed) do
-      {:ok, _} -> {:ok, "0x" <> hex}
-      :error -> :error
+  defp validate_identifier(identifier) do
+    case String.trim(identifier) do
+      "" -> :error
+      trimmed -> {:ok, trimmed}
     end
   end
 
-  defp validate_hash32(_), do: :error
+  # Accepts plain KES ("250" or "250.50") and converts to the minor-unit
+  # integer the contract actually stores (cents), so a tester types a
+  # normal shilling amount instead of doing the *100 math themselves.
+  defp parse_kes(amount_kes) do
+    case Float.parse(amount_kes) do
+      {kes, ""} when kes > 0 -> {:ok, round(kes * 100)}
+      _ ->
+        case Integer.parse(amount_kes) do
+          {kes, ""} when kes > 0 -> {:ok, kes * 100}
+          _ -> :error
+        end
+    end
+  end
 
   def render(assigns) do
     ~H"""
     <div id="wallet" phx-hook="Wallet" class="space-y-8">
+      <div class="alert bg-warning/10 border border-warning/30 text-warning-content shadow-sm">
+        <.icon name="hero-beaker" class="size-5 text-warning" />
+        <span class="text-sm">
+          <strong>Testnet pilot.</strong> Everything here uses test CKB with no real-world value &mdash; nothing you do on this page moves real money.
+        </span>
+      </div>
+
       <div class="flex flex-wrap items-start justify-between gap-5">
         <div>
           <div class="font-mono text-xs uppercase tracking-widest text-primary font-semibold mb-1">
@@ -165,6 +184,29 @@ defmodule WebWeb.OffersLive do
         </div>
       </div>
 
+      <div :if={@wallet && @wallet.balance_ckb < 10} class="alert bg-info/10 border border-info/30 shadow-sm">
+        <.icon name="hero-information-circle" class="size-5 text-info" />
+        <div class="text-sm">
+          <strong>Your wallet needs testnet CKB before you can create, reserve, or claim an offer.</strong>
+          <div class="mt-1">
+            Copy your address
+            <button
+              type="button"
+              class="font-mono underline decoration-dotted"
+              onclick={"navigator.clipboard.writeText('#{@wallet.address}')"}
+            >
+              {short_hash(@wallet.address)}
+            </button>
+            and email it to
+            <a
+              class="link"
+              href={"mailto:kenneth.njoroge@quantumke.org?subject=Bitshada%20testnet%20funding&body=Please%20fund%20my%20wallet%3A%20" <> @wallet.address}
+            >kenneth.njoroge@quantumke.org</a>
+            &mdash; you'll get a small top-up so you can actually try the flow.
+          </div>
+        </div>
+      </div>
+
       <div :if={@notice} class="alert alert-success shadow-sm">
         <.icon name="hero-check-circle" class="size-5" />
         <span class="font-mono text-sm break-all">{@notice}</span>
@@ -180,20 +222,31 @@ defmodule WebWeb.OffersLive do
 
       <div class="card bg-base-200 border border-base-300 shadow-sm">
         <div class="card-body">
+          <h2 class="font-display text-lg font-semibold">How this works</h2>
+          <ol class="mt-1 space-y-1.5 text-sm text-base-content/70 list-decimal list-inside">
+            <li><strong class="text-base-content">Sellers</strong> lock CKB in escrow and name the KES price &mdash; that's the form below.</li>
+            <li><strong class="text-base-content">Buyers</strong> click <span class="font-mono">Reserve</span> on an offer to claim first dibs, then (for real trades) send KES via M-Pesa off-chain.</li>
+            <li>The buyer then clicks <span class="font-mono">Claim</span>, and the contract releases the CKB straight to their wallet.</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="card bg-base-200 border border-base-300 shadow-sm">
+        <div class="card-body">
           <h2 class="font-display text-lg font-semibold">Sell CKB for KES</h2>
           <.form :if={@wallet} for={@create_form} phx-submit="create_offer" class="flex flex-wrap items-end gap-3 mt-1">
             <label class="flex-1 min-w-56 form-control">
-              <span class="label-text text-xs text-base-content/60 mb-1">Recipient hash (0x + 64 hex)</span>
+              <span class="label-text text-xs text-base-content/60 mb-1">M-Pesa number (any test value works)</span>
               <input
                 type="text"
-                name="recipient_hash"
-                class="input input-bordered input-sm w-full font-mono"
-                placeholder="0x0707...0707"
+                name="identifier"
+                class="input input-bordered input-sm w-full"
+                placeholder="0712 345 678"
               />
             </label>
             <label class="form-control">
-              <span class="label-text text-xs text-base-content/60 mb-1">Amount (KES minor units)</span>
-              <input type="text" name="amount" class="input input-bordered input-sm w-32 font-mono" placeholder="25000" />
+              <span class="label-text text-xs text-base-content/60 mb-1">Amount (KES)</span>
+              <input type="text" name="amount" class="input input-bordered input-sm w-32" placeholder="250" />
             </label>
             <.button type="submit" disabled={@busy == :create} phx-disable-with="Creating..." class="btn-primary">
               <span :if={@busy == :create} class="loading loading-spinner loading-xs"></span>

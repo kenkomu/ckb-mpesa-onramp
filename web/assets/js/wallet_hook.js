@@ -3,15 +3,18 @@
 // signing/submission call lives in ckb.js; this just relays LiveView
 // events to it, translates any error into plain language, and pushes
 // the result back.
-import { createOffer, reserveOffer, claimOffer, walletInfo } from "./ckb.js";
+import { createOffer, reserveOffer, claimOffer, walletInfo, hashIdentifier } from "./ckb.js";
 import { friendlyError } from "./chain_errors.js";
 
 export const Wallet = {
   async mounted() {
     await this.refreshWallet();
 
-    this.handleEvent("run_create_offer", async ({ recipient_hash, amount }) => {
-      await this.run("create", () => createOffer(recipient_hash, Number(amount)));
+    this.handleEvent("run_create_offer", async ({ identifier, amount }) => {
+      await this.run("create", async () => {
+        const recipientHash = await hashIdentifier(identifier);
+        return createOffer(recipientHash, Number(amount));
+      });
     });
 
     this.handleEvent("run_reserve_offer", async ({ offer }) => {
