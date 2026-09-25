@@ -19,6 +19,13 @@ defmodule WebWeb.Router do
 
     live "/", OffersLive
     live "/offers", OffersLive
+
+    # Mobile app handoff pages -- opened in the system browser via
+    # url_launcher, never an embedded WebView, per the project plan's
+    # "hop out to a URL, come back via deep link" wallet-connect
+    # pattern. See each LiveView's own moduledoc.
+    live "/mobile/connect", MobileConnectLive
+    live "/mobile/action", MobileActionLive
   end
 
   # The JSON API surface: everything a mobile app (or the web UI's own

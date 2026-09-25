@@ -60,6 +60,69 @@ defmodule Web.Ckb.Offers do
   @min_open_capacity_shannon (8 + 32 + 1 + @args_len + 32 + 1 + @guard_args_len) * 100_000_000
 
   @doc """
+  Turns a human-entered M-Pesa number (or, for this pilot, any test
+  value) into a non-empty trimmed identifier ready to hand to ckb.js's
+  hashIdentifier -- shared between the web create-offer form and the
+  mobile app's own create action.
+  """
+  def validate_identifier(identifier) do
+    case String.trim(identifier) do
+      "" -> :error
+      trimmed -> {:ok, trimmed}
+    end
+  end
+
+  @doc """
+  Parses a plain KES amount ("250" or "250.50") into the minor-unit
+  integer the contract actually stores, so neither front end has to ask
+  a person to do the *100 math themselves.
+  """
+  def parse_kes(amount_kes) do
+    case Float.parse(amount_kes) do
+      {kes, ""} when kes > 0 ->
+        {:ok, round(kes * 100)}
+
+      _ ->
+        case Integer.parse(amount_kes) do
+          {kes, ""} when kes > 0 -> {:ok, kes * 100}
+          _ -> :error
+        end
+    end
+  end
+
+  @doc """
+  Finds one live offer by its cell identity (tx_hash + index), or `nil`
+  if it's not currently listed (already claimed, or never existed).
+  Shared by the web marketplace and the mobile app's action handoff page
+  -- both look an offer up by identity before reserving/claiming it.
+  """
+  def find(tx_hash, index) do
+    with {:ok, offers} <- list() do
+      Enum.find(offers, fn o -> o.out_point["tx_hash"] == tx_hash and o.out_point["index"] == index end)
+    end
+  end
+
+  @doc """
+  The plain-map shape ckb.js's reserveOffer/claimOffer expect as their
+  `offer` argument -- shared so the web marketplace and the mobile
+  action page build the exact same payload rather than two hand-written
+  copies drifting apart.
+  """
+  def to_json(offer) do
+    %{
+      out_point: offer.out_point,
+      capacity_shannon: offer.capacity_shannon,
+      witness_address: offer.witness_address,
+      recipient_hash: offer.recipient_hash,
+      amount: offer.amount,
+      registry_type_hash: offer.registry_type_hash,
+      offer_guard_type_hash: offer.offer_guard_type_hash,
+      status: offer.status,
+      reserved_by_lock_hash: offer.reserved_by_lock_hash
+    }
+  end
+
+  @doc """
   Lists every live mpesa-escrow cell on the configured node, regardless of
   who created it or its reservation state. Returns `{:ok, [%__MODULE__{}]}`
   or `{:error, reason}` -- callers decide how to render a node-unreachable

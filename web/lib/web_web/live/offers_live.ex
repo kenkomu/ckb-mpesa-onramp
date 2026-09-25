@@ -41,8 +41,8 @@ defmodule WebWeb.OffersLive do
   end
 
   def handle_event("create_offer", %{"identifier" => identifier, "amount" => amount_kes}, socket) do
-    with {:ok, identifier} <- validate_identifier(identifier),
-         {:ok, minor_units} <- parse_kes(amount_kes) do
+    with {:ok, identifier} <- Offers.validate_identifier(identifier),
+         {:ok, minor_units} <- Offers.parse_kes(amount_kes) do
       {:noreply,
        socket
        |> assign(busy: :create, notice: nil, tx_error: nil)
@@ -53,7 +53,7 @@ defmodule WebWeb.OffersLive do
   end
 
   def handle_event("reserve_offer", %{"tx_hash" => tx_hash, "index" => index}, socket) do
-    case find_offer(socket, tx_hash, index) do
+    case Offers.find(tx_hash, index) do
       nil ->
         {:noreply, assign(socket, tx_error: "That offer isn't listed anymore -- try refreshing.")}
 
@@ -61,12 +61,12 @@ defmodule WebWeb.OffersLive do
         {:noreply,
          socket
          |> assign(busy: :reserve, notice: nil, tx_error: nil)
-         |> push_event("run_reserve_offer", %{offer: offer_json(offer)})}
+         |> push_event("run_reserve_offer", %{offer: Offers.to_json(offer)})}
     end
   end
 
   def handle_event("claim_offer", %{"tx_hash" => tx_hash, "index" => index}, socket) do
-    case find_offer(socket, tx_hash, index) do
+    case Offers.find(tx_hash, index) do
       nil ->
         {:noreply, assign(socket, tx_error: "That offer isn't listed anymore -- try refreshing.")}
 
@@ -76,7 +76,7 @@ defmodule WebWeb.OffersLive do
         {:noreply,
          socket
          |> assign(busy: :claim, notice: nil, tx_error: nil)
-         |> push_event("run_claim_offer", %{offer: offer_json(offer), tx_id_seed: tx_id_seed})}
+         |> push_event("run_claim_offer", %{offer: Offers.to_json(offer), tx_id_seed: tx_id_seed})}
     end
   end
 
@@ -100,45 +100,6 @@ defmodule WebWeb.OffersLive do
     case Offers.list() do
       {:ok, offers} -> assign(socket, offers: offers, error: nil)
       {:error, reason} -> assign(socket, offers: [], error: reason)
-    end
-  end
-
-  defp find_offer(socket, tx_hash, index) do
-    Enum.find(socket.assigns.offers, fn o -> o.out_point["tx_hash"] == tx_hash and o.out_point["index"] == index end)
-  end
-
-  defp offer_json(offer) do
-    %{
-      out_point: offer.out_point,
-      capacity_shannon: offer.capacity_shannon,
-      witness_address: offer.witness_address,
-      recipient_hash: offer.recipient_hash,
-      amount: offer.amount,
-      registry_type_hash: offer.registry_type_hash,
-      offer_guard_type_hash: offer.offer_guard_type_hash,
-      status: offer.status,
-      reserved_by_lock_hash: offer.reserved_by_lock_hash
-    }
-  end
-
-  defp validate_identifier(identifier) do
-    case String.trim(identifier) do
-      "" -> :error
-      trimmed -> {:ok, trimmed}
-    end
-  end
-
-  # Accepts plain KES ("250" or "250.50") and converts to the minor-unit
-  # integer the contract actually stores (cents), so a tester types a
-  # normal shilling amount instead of doing the *100 math themselves.
-  defp parse_kes(amount_kes) do
-    case Float.parse(amount_kes) do
-      {kes, ""} when kes > 0 -> {:ok, round(kes * 100)}
-      _ ->
-        case Integer.parse(amount_kes) do
-          {kes, ""} when kes > 0 -> {:ok, kes * 100}
-          _ -> :error
-        end
     end
   end
 

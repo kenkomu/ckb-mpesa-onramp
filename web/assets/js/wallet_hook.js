@@ -24,6 +24,18 @@ export const Wallet = {
     this.handleEvent("run_claim_offer", async ({ offer, tx_id_seed }) => {
       await this.run("claim", () => claimOffer(offer, tx_id_seed));
     });
+
+    // Mobile handoff pages (mobile_connect_live.ex, mobile_action_live.ex)
+    // push this once they're done, to hand control back to the Flutter
+    // app via its registered bitshada:// scheme. A short delay lets the
+    // "connected"/"done" confirmation actually render before the system
+    // browser gets backgrounded -- an instant redirect reads as nothing
+    // having happened.
+    this.handleEvent("mobile_deep_link", ({ url }) => {
+      setTimeout(() => {
+        window.location.href = url;
+      }, 900);
+    });
   },
 
   async refreshWallet() {
