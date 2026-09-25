@@ -37,10 +37,13 @@ defmodule WebWeb.Layouts do
     ~H"""
     <header class="navbar px-4 sm:px-6 lg:px-8 border-b border-base-300">
       <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-baseline gap-2">
-          <span class="font-display text-xl font-bold tracking-tight">Bitshada</span>
-          <span class="hidden sm:inline text-xs text-base-content/60">
-            trustless M-Pesa &harr; CKB
+        <a href="/" class="flex-1 flex w-fit items-center gap-2.5">
+          <.brand_mark class="size-7" />
+          <span class="flex items-baseline gap-2">
+            <span class="font-display text-xl font-bold tracking-tight">Bitshada</span>
+            <span class="hidden sm:inline text-xs text-base-content/60">
+              trustless M-Pesa &harr; CKB
+            </span>
           </span>
         </a>
       </div>
@@ -119,6 +122,24 @@ defmodule WebWeb.Layouts do
         <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
       </.flash>
     </div>
+    """
+  end
+
+  @doc """
+  The Bitshada brand mark: two overlapping circles on a rounded square --
+  two parties/currencies meeting in one exchange. Used in the navbar and
+  on the mobile handoff pages so those bare status screens still read as
+  part of the same product.
+  """
+  attr :class, :string, default: "size-6"
+
+  def brand_mark(assigns) do
+    ~H"""
+    <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" class={@class}>
+      <rect width="32" height="32" rx="8" fill="#1e8f6f" />
+      <circle cx="13" cy="16" r="7" fill="#ffffff" fill-opacity="0.92" />
+      <circle cx="19" cy="16" r="7" fill="#ffffff" fill-opacity="0.55" />
+    </svg>
     """
   end
 

@@ -60,6 +60,13 @@ const KNOWN_PATTERNS = [
   [/PoolRejectedTransactionByMinFeeRate|LowFeeRate/, () => "The network rejected this for too low a fee -- please try again."],
   [/Dead\(OutPoint/, () => "That cell was already spent by another transaction -- refresh and try again."],
   [/Unknown\(?OutPoint|Resolve Unknown OutPoint/, () => "That offer no longer exists on chain -- refresh the page."],
+  // waitCommitted's own timeout (ckb.js) -- the transaction was already
+  // accepted into the mempool by this point (send_transaction succeeded
+  // before this wait even starts), so this means "still pending," not
+  // "failed": a slow testnet commit can still land seconds after this
+  // fires. Confirmed for real: a "did not commit" error's own tx_hash,
+  // checked moments later via get_transaction, came back "committed."
+  [/did not commit within \d+ms/, () => "This is taking longer than usual to confirm on testnet -- it may still go through. Refresh in a moment to check."],
 ];
 
 /** Best-effort plain-language rendering of a raw error/Error-string from ckb.js. */

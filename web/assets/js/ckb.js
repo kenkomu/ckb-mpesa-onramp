@@ -277,7 +277,13 @@ async function submit(tx, config) {
   return sentHash;
 }
 
-async function waitCommitted(txHash, config, { timeoutMs = 30000, intervalMs = 400 } = {}) {
+// 30s used to be enough, but real testnet commits have taken 15-30s+ in
+// practice (observed repeatedly during on-device testing) -- a commit
+// that lands at, say, 32s previously surfaced as a hard "failed" error
+// in the UI even though the transaction had already succeeded on-chain
+// (confirmed via get_transaction: status "committed") moments later.
+// 90s gives real commits enough room while still bounding the wait.
+async function waitCommitted(txHash, config, { timeoutMs = 90000, intervalMs = 400 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const res = await fetch(config.rpc_url, {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../main.dart' show bitshadaMono;
 import '../models/offer.dart';
 import '../services/api.dart';
 import '../services/wallet_connect.dart';
@@ -85,30 +86,37 @@ class _OffersScreenState extends State<OffersScreen> {
       isScrollControlled: true,
       builder: (context) => Padding(
         padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 16,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+          left: 20,
+          right: 20,
+          top: 20,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 20,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Sell CKB for KES', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
+            Text('Sell CKB for KES', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 16),
             TextField(
               controller: identifierController,
-              decoration: const InputDecoration(labelText: 'M-Pesa number (any test value works)', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: 'M-Pesa number (any test value works)',
+                border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             TextField(
               controller: amountController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Amount (KES)', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: 'Amount (KES)',
+                border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
+              ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
+              height: 48,
               child: FilledButton(
                 onPressed: () => Navigator.pop(context, true),
                 child: const Text('Create offer'),
@@ -130,13 +138,14 @@ class _OffersScreenState extends State<OffersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Column(
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Bitshada', style: TextStyle(fontWeight: FontWeight.bold)),
-            Text('Open offers', style: TextStyle(fontSize: 13, fontWeight: FontWeight.normal)),
+            Text('Bitshada', style: Theme.of(context).textTheme.titleLarge),
+            Text('Open offers', style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
         actions: [
@@ -157,16 +166,16 @@ class _OffersScreenState extends State<OffersScreen> {
         children: [
           Container(
             width: double.infinity,
-            color: Theme.of(context).colorScheme.tertiaryContainer,
+            color: scheme.tertiaryContainer,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                Icon(Icons.science_outlined, size: 16, color: Theme.of(context).colorScheme.onTertiaryContainer),
+                Icon(Icons.science_outlined, size: 16, color: scheme.onTertiaryContainer),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Testnet pilot -- test CKB only, no real money.',
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onTertiaryContainer),
+                    style: TextStyle(fontSize: 12, color: scheme.onTertiaryContainer),
                   ),
                 ),
               ],
@@ -175,28 +184,28 @@ class _OffersScreenState extends State<OffersScreen> {
           if (_connectedWallet != null && _connectedWallet!.balanceCkb < 10)
             Container(
               width: double.infinity,
-              color: Theme.of(context).colorScheme.secondaryContainer,
+              color: scheme.secondaryContainer,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(
                 'Your wallet needs testnet CKB. Tap your balance above to copy the address, then email it to '
                 'kenneth.njoroge@quantumke.org for a top-up.',
-                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSecondaryContainer),
+                style: TextStyle(fontSize: 12, color: scheme.onSecondaryContainer),
               ),
             ),
           if (_actionError != null)
             Container(
               width: double.infinity,
-              color: Theme.of(context).colorScheme.errorContainer,
+              color: scheme.errorContainer,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(_actionError!, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onErrorContainer)),
+                    child: Text(_actionError!, style: TextStyle(fontSize: 12, color: scheme.onErrorContainer)),
                   ),
                   IconButton(
                     icon: const Icon(Icons.close, size: 16),
                     onPressed: () => setState(() => _actionError = null),
-                    color: Theme.of(context).colorScheme.onErrorContainer,
+                    color: scheme.onErrorContainer,
                   ),
                 ],
               ),
@@ -216,11 +225,11 @@ class _OffersScreenState extends State<OffersScreen> {
                   final offers = snapshot.data ?? [];
                   if (offers.isEmpty) {
                     return ListView(
-                      children: const [
-                        SizedBox(height: 120),
-                        Icon(Icons.inbox_outlined, size: 40, color: Colors.grey),
-                        SizedBox(height: 12),
-                        Center(child: Text('No open offers right now.')),
+                      children: [
+                        const SizedBox(height: 120),
+                        Icon(Icons.inbox_outlined, size: 40, color: scheme.onSurface.withValues(alpha: 0.35)),
+                        const SizedBox(height: 12),
+                        Center(child: Text('No open offers right now.', style: TextStyle(color: scheme.onSurface.withValues(alpha: 0.6)))),
                       ],
                     );
                   }
@@ -252,6 +261,8 @@ class _WalletButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     if (connecting) {
       return const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2));
     }
@@ -264,6 +275,7 @@ class _WalletButton extends StatelessWidget {
     // to ask for a testnet top-up. Same gap the web app already closed
     // with its own copy-address funding guidance.
     return InkWell(
+      borderRadius: BorderRadius.circular(999),
       onTap: () async {
         await Clipboard.setData(ClipboardData(text: wallet!.address));
         if (context.mounted) {
@@ -272,19 +284,35 @@ class _WalletButton extends StatelessWidget {
           );
         }
       },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(short, style: const TextStyle(fontSize: 10, fontFamily: 'monospace')),
-          Text('${wallet!.balanceCkb.toStringAsFixed(2)} CKB', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-        ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 6, height: 6, decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(short, style: bitshadaMono(context, fontSize: 10, color: scheme.onSurfaceVariant)),
+                Text('${wallet!.balanceCkb.toStringAsFixed(2)} CKB',
+                    style: bitshadaMono(context, fontSize: 12, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _OfferCard extends StatelessWidget {
+class _OfferCard extends StatefulWidget {
   final Offer offer;
   final Wallet? wallet;
   final VoidCallback onReserve;
@@ -292,54 +320,99 @@ class _OfferCard extends StatelessWidget {
   const _OfferCard({required this.offer, required this.wallet, required this.onReserve, required this.onClaim});
 
   @override
-  Widget build(BuildContext context) {
-    final isOpen = offer.status == 'open';
-    final statusColor = isOpen ? Colors.green : Colors.orange;
-    final canReserve = wallet != null && isOpen;
-    final canClaim = wallet != null && !isOpen && offer.reservedByLockHash == wallet!.lockHash;
-    final reservedByOther = !isOpen && (wallet == null || offer.reservedByLockHash != wallet!.lockHash);
+  State<_OfferCard> createState() => _OfferCardState();
+}
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+/// Subtle fade + slide-up entrance, mirroring the web app's
+/// `animate-fade-slide-up` CSS keyframe -- same motion language on both
+/// surfaces, done here with Flutter's own implicit animations rather
+/// than a new package.
+class _OfferCardState extends State<_OfferCard> {
+  double _opacity = 0;
+  double _dy = 6;
+
+  @override
+  void initState() {
+    super.initState();
+    // Skip the entrance motion entirely when the system's reduced-motion
+    // accessibility setting is on, instead of just shortening it.
+    if (WidgetsBinding.instance.platformDispatcher.accessibilityFeatures.disableAnimations) {
+      _opacity = 1;
+      _dy = 0;
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() { _opacity = 1; _dy = 0; });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final offer = widget.offer;
+    final wallet = widget.wallet;
+    final isOpen = offer.status == 'open';
+    final statusColor = isOpen ? scheme.primary : scheme.secondary;
+    final canReserve = wallet != null && isOpen;
+    final canClaim = wallet != null && !isOpen && offer.reservedByLockHash == wallet.lockHash;
+    final reservedByOther = !isOpen && (wallet == null || offer.reservedByLockHash != wallet.lockHash);
+
+    return AnimatedOpacity(
+      opacity: _opacity,
+      duration: const Duration(milliseconds: 250),
+      child: AnimatedSlide(
+        offset: Offset(0, _dy / 60),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+        child: Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          color: scheme.surfaceContainerLow,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: scheme.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(999)),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(width: 6, height: 6, decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle)),
-                      const SizedBox(width: 5),
-                      Text(offer.status, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
-                    ],
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(999)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(width: 6, height: 6, decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle)),
+                          const SizedBox(width: 5),
+                          Text(offer.status, style: bitshadaMono(context, fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+                        ],
+                      ),
+                    ),
+                    Text(offer.shortCell, style: bitshadaMono(context, fontSize: 11, color: scheme.onSurfaceVariant)),
+                  ],
                 ),
-                Text(offer.shortCell, style: const TextStyle(fontSize: 11, color: Colors.grey, fontFamily: 'monospace')),
+                const SizedBox(height: 8),
+                Text('${offer.amountKes.toStringAsFixed(2)} KES', style: bitshadaMono(context, fontSize: 22, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text('${offer.capacityCkb.toStringAsFixed(2)} CKB locked in escrow',
+                    style: bitshadaMono(context, fontSize: 13, color: scheme.onSurfaceVariant)),
+                const SizedBox(height: 2),
+                Text('Recipient: ${offer.shortRecipient}', style: bitshadaMono(context, fontSize: 11, color: scheme.onSurfaceVariant)),
+                if (canReserve || canClaim || reservedByOther) ...[
+                  const SizedBox(height: 10),
+                  if (canReserve)
+                    SizedBox(width: double.infinity, height: 48, child: FilledButton(onPressed: widget.onReserve, child: const Text('Reserve'))),
+                  if (canClaim)
+                    SizedBox(width: double.infinity, height: 48, child: FilledButton(onPressed: widget.onClaim, child: const Text('Claim'))),
+                  if (reservedByOther)
+                    Center(child: Text('Reserved by another buyer', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant))),
+                ],
               ],
             ),
-            const SizedBox(height: 8),
-            Text('${offer.amountKes.toStringAsFixed(2)} KES', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 2),
-            Text('${offer.capacityCkb.toStringAsFixed(2)} CKB locked in escrow', style: const TextStyle(fontSize: 13, color: Colors.grey)),
-            const SizedBox(height: 2),
-            Text('Recipient: ${offer.shortRecipient}', style: const TextStyle(fontSize: 11, color: Colors.grey, fontFamily: 'monospace')),
-            if (canReserve || canClaim || reservedByOther) ...[
-              const SizedBox(height: 10),
-              if (canReserve)
-                SizedBox(width: double.infinity, child: FilledButton(onPressed: onReserve, child: const Text('Reserve'))),
-              if (canClaim)
-                SizedBox(width: double.infinity, child: FilledButton(onPressed: onClaim, child: const Text('Claim'))),
-              if (reservedByOther)
-                const Center(child: Text('Reserved by another buyer', style: TextStyle(fontSize: 12, color: Colors.grey))),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -353,14 +426,15 @@ class _ErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return ListView(
       children: [
         const SizedBox(height: 80),
-        const Icon(Icons.error_outline, size: 40, color: Colors.red),
+        Icon(Icons.error_outline, size: 40, color: scheme.error),
         const SizedBox(height: 12),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Text('Could not reach Bitshada: $error', textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+          child: Text('Could not reach Bitshada: $error', textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurfaceVariant)),
         ),
         const SizedBox(height: 16),
         Center(child: FilledButton(onPressed: onRetry, child: const Text('Retry'))),

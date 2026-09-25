@@ -49,25 +49,30 @@ defmodule WebWeb.MobileConnectLive do
   def render(assigns) do
     ~H"""
     <div id="wallet" phx-hook="Wallet" class="flex flex-col items-center justify-center min-h-[70vh] gap-4 text-center px-6">
-      <div class="font-mono text-xs uppercase tracking-widest text-primary font-semibold">
-        Bitshada &middot; Wallet
-      </div>
+      <div class="card bg-base-200 border border-base-300 shadow-sm w-full max-w-xs">
+        <div class="card-body items-center py-8">
+          <WebWeb.Layouts.brand_mark class="size-10 mb-1" />
+          <div class="font-mono text-xs uppercase tracking-widest text-primary font-semibold">
+            Bitshada &middot; Wallet
+          </div>
 
-      <div :if={@wallet == nil and @wallet_error == nil} class="flex flex-col items-center gap-3">
-        <span class="loading loading-spinner loading-lg text-primary"></span>
-        <p class="text-base-content/60">Connecting your wallet...</p>
-      </div>
+          <div :if={@wallet == nil and @wallet_error == nil} class="flex flex-col items-center gap-3 mt-2">
+            <span class="loading loading-spinner loading-lg text-primary"></span>
+            <p class="text-base-content/60">Connecting your wallet...</p>
+          </div>
 
-      <div :if={@wallet} class="flex flex-col items-center gap-2">
-        <.icon name="hero-check-circle" class="size-10 text-success" />
-        <p class="font-semibold">Wallet connected</p>
-        <p class="font-mono text-xs text-base-content/60 break-all max-w-xs">{@wallet.address}</p>
-        <p class="text-sm text-base-content/70">Returning to the app...</p>
-      </div>
+          <div :if={@wallet} class="flex flex-col items-center gap-2 mt-2">
+            <.icon name="hero-check-circle" class="size-10 text-success" />
+            <p class="font-semibold">Wallet connected</p>
+            <p class="font-mono text-xs text-base-content/60 break-all max-w-xs">{@wallet.address}</p>
+            <p class="text-sm text-base-content/70">Returning to the app...</p>
+          </div>
 
-      <div :if={@wallet_error} class="flex flex-col items-center gap-2">
-        <.icon name="hero-exclamation-triangle" class="size-10 text-error" />
-        <p class="text-error text-sm">{@wallet_error}</p>
+          <div :if={@wallet_error} class="flex flex-col items-center gap-2 mt-2">
+            <.icon name="hero-exclamation-triangle" class="size-10 text-error" />
+            <p class="text-error text-sm">{@wallet_error}</p>
+          </div>
+        </div>
       </div>
     </div>
     """

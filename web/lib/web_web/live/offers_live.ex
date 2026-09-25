@@ -181,14 +181,40 @@ defmodule WebWeb.OffersLive do
         <span class="text-sm">Could not reach the CKB node: {inspect(@error)}</span>
       </div>
 
-      <div class="card bg-base-200 border border-base-300 shadow-sm">
-        <div class="card-body">
-          <h2 class="font-display text-lg font-semibold">How this works</h2>
-          <ol class="mt-1 space-y-1.5 text-sm text-base-content/70 list-decimal list-inside">
-            <li><strong class="text-base-content">Sellers</strong> lock CKB in escrow and name the KES price &mdash; that's the form below.</li>
-            <li><strong class="text-base-content">Buyers</strong> click <span class="font-mono">Reserve</span> on an offer to claim first dibs, then (for real trades) send KES via M-Pesa off-chain.</li>
-            <li>The buyer then clicks <span class="font-mono">Claim</span>, and the contract releases the CKB straight to their wallet.</li>
-          </ol>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div class="card bg-base-200 border border-base-300 shadow-sm">
+          <div class="card-body gap-1.5">
+            <div class="flex items-center gap-2">
+              <span class="flex size-7 items-center justify-center rounded-full bg-primary/15 text-primary font-mono text-xs font-bold">1</span>
+              <.icon name="hero-lock-closed" class="size-4 text-primary" />
+            </div>
+            <h3 class="font-display font-semibold">Sellers lock CKB</h3>
+            <p class="text-sm text-base-content/70">Escrow on-chain and name the KES price &mdash; that's the form below.</p>
+          </div>
+        </div>
+        <div class="card bg-base-200 border border-base-300 shadow-sm">
+          <div class="card-body gap-1.5">
+            <div class="flex items-center gap-2">
+              <span class="flex size-7 items-center justify-center rounded-full bg-primary/15 text-primary font-mono text-xs font-bold">2</span>
+              <.icon name="hero-hand-raised" class="size-4 text-primary" />
+            </div>
+            <h3 class="font-display font-semibold">Buyers reserve</h3>
+            <p class="text-sm text-base-content/70">
+              Click <span class="font-mono">Reserve</span> for first dibs, then send KES via M-Pesa off-chain.
+            </p>
+          </div>
+        </div>
+        <div class="card bg-base-200 border border-base-300 shadow-sm">
+          <div class="card-body gap-1.5">
+            <div class="flex items-center gap-2">
+              <span class="flex size-7 items-center justify-center rounded-full bg-primary/15 text-primary font-mono text-xs font-bold">3</span>
+              <.icon name="hero-check-badge" class="size-4 text-primary" />
+            </div>
+            <h3 class="font-display font-semibold">Buyer claims</h3>
+            <p class="text-sm text-base-content/70">
+              Click <span class="font-mono">Claim</span> and the contract releases CKB straight to their wallet.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -226,7 +252,7 @@ defmodule WebWeb.OffersLive do
       <div :if={@offers != []} class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div
           :for={offer <- @offers}
-          class="card bg-base-200 border border-base-300 shadow-sm hover:shadow-md hover:border-primary/40 transition"
+          class="motion-safe:animate-fade-slide-up card bg-base-200 border border-base-300 shadow-sm transition-all duration-200 hover:shadow-md hover:border-primary/40 hover:-translate-y-0.5"
         >
           <div class="card-body gap-2">
             <div class="flex items-center justify-between">

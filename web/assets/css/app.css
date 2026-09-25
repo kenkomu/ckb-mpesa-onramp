@@ -123,4 +123,16 @@ h1, h2, h3, .font-display {
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* Subtle entrance for offer cards -- fade + slide up on first paint,
+   never re-triggers on LiveView patches since it's keyed by the DOM
+   node's own animation, not a class toggle. Respects reduced-motion
+   via the motion-safe: variant at the call site. */
+@keyframes fade-slide-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-slide-up {
+  animation: fade-slide-up 0.3s ease-out both;
+}
+
 /* This file is for your main application CSS */
