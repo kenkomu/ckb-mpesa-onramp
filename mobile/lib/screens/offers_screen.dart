@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/offer.dart';
 import '../services/api.dart';
 import '../services/wallet_connect.dart';
@@ -171,6 +172,17 @@ class _OffersScreenState extends State<OffersScreen> {
               ],
             ),
           ),
+          if (_connectedWallet != null && _connectedWallet!.balanceCkb < 10)
+            Container(
+              width: double.infinity,
+              color: Theme.of(context).colorScheme.secondaryContainer,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                'Your wallet needs testnet CKB. Tap your balance above to copy the address, then email it to '
+                'kenneth.njoroge@quantumke.org for a top-up.',
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSecondaryContainer),
+              ),
+            ),
           if (_actionError != null)
             Container(
               width: double.infinity,
@@ -247,13 +259,27 @@ class _WalletButton extends StatelessWidget {
       return TextButton(onPressed: onTap, child: const Text('Connect wallet'));
     }
     final short = '${wallet!.address.substring(0, 10)}...';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(short, style: const TextStyle(fontSize: 10, fontFamily: 'monospace')),
-        Text('${wallet!.balanceCkb.toStringAsFixed(2)} CKB', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-      ],
+    // Tapping copies the FULL address -- the label only ever shows a
+    // short form, and a tester has no other way to get the real value
+    // to ask for a testnet top-up. Same gap the web app already closed
+    // with its own copy-address funding guidance.
+    return InkWell(
+      onTap: () async {
+        await Clipboard.setData(ClipboardData(text: wallet!.address));
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Wallet address copied'), duration: Duration(seconds: 2)),
+          );
+        }
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(short, style: const TextStyle(fontSize: 10, fontFamily: 'monospace')),
+          Text('${wallet!.balanceCkb.toStringAsFixed(2)} CKB', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        ],
+      ),
     );
   }
 }
