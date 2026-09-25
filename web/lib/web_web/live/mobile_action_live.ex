@@ -13,6 +13,12 @@ defmodule WebWeb.MobileActionLive do
   code, not a second implementation), then redirects to
   `bitshada://action-done?...` or `bitshada://action-error?...` --
   never both an action and someone browsing, unlike OffersLive.
+
+  Echoes back the `state` query param the app passed when it opened
+  this page -- see WalletConnectService's own `_newState` doc comment
+  for why (guards against the app's deep-link listener picking up a
+  stale link left over from an earlier launch instead of this call's
+  real result).
   """
 
   use WebWeb, :live_view
@@ -38,12 +44,18 @@ defmodule WebWeb.MobileActionLive do
   end
 
   def handle_event("tx_success", %{"action" => action, "tx_hash" => tx_hash}, socket) do
-    deep_link = "bitshada://action-done?" <> URI.encode_query(%{"action" => action, "tx_hash" => tx_hash})
+    deep_link =
+      "bitshada://action-done?" <>
+        URI.encode_query(%{"action" => action, "tx_hash" => tx_hash, "state" => socket.assigns.params["state"]})
+
     {:noreply, socket |> assign(status: :done) |> push_event("mobile_deep_link", %{url: deep_link})}
   end
 
   def handle_event("tx_error", %{"action" => action, "message" => message}, socket) do
-    deep_link = "bitshada://action-error?" <> URI.encode_query(%{"action" => action, "message" => message})
+    deep_link =
+      "bitshada://action-error?" <>
+        URI.encode_query(%{"action" => action, "message" => message, "state" => socket.assigns.params["state"]})
+
     {:noreply, socket |> assign(status: :error, error: message) |> push_event("mobile_deep_link", %{url: deep_link})}
   end
 

@@ -12,12 +12,19 @@ defmodule WebWeb.MobileConnectLive do
   connected wallet and then redirect to `bitshada://wallet-connected`
   with the address/lockHash/balance as query params, which the Android
   app's intent filter (see mobile/android AndroidManifest.xml) catches.
+
+  The app passes a random `state` param when it opens this page, echoed
+  back verbatim in the redirect -- see WalletConnectService's own doc
+  comment on `_newState` for why that matters: without it, a listener
+  that's just subscribed can be handed a stale link the platform is
+  still holding from an earlier launch, mistaking old data for this
+  call's real result.
   """
 
   use WebWeb, :live_view
 
-  def mount(_params, _session, socket) do
-    {:ok, assign(socket, wallet: nil, wallet_error: nil)}
+  def mount(params, _session, socket) do
+    {:ok, assign(socket, wallet: nil, wallet_error: nil, state: params["state"])}
   end
 
   def handle_event("wallet_ready", %{"address" => address, "lockHash" => lock_hash, "balanceCkb" => balance_ckb}, socket) do
@@ -25,7 +32,12 @@ defmodule WebWeb.MobileConnectLive do
 
     deep_link =
       "bitshada://wallet-connected?" <>
-        URI.encode_query(%{"address" => address, "lockHash" => lock_hash, "balanceCkb" => balance_ckb})
+        URI.encode_query(%{
+          "address" => address,
+          "lockHash" => lock_hash,
+          "balanceCkb" => balance_ckb,
+          "state" => socket.assigns.state
+        })
 
     {:noreply, socket |> assign(wallet: wallet) |> push_event("mobile_deep_link", %{url: deep_link})}
   end

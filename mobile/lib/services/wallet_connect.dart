@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:app_links/app_links.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -32,6 +33,7 @@ class ActionResult {
 class WalletConnectService {
   final String baseUrl;
   final _appLinks = AppLinks();
+  final _rng = Random.secure();
   StreamSubscription<Uri>? _sub;
 
   WalletConnectService({this.baseUrl = 'https://api.bitshada.com'});
@@ -41,8 +43,9 @@ class WalletConnectService {
   /// browser tab/profile keeps its own wallet across repeat connects,
   /// same as the web app's own localStorage-persisted signer.
   Future<Wallet> connect() async {
+    final state = _newState();
     final completer = Completer<Wallet>();
-    _listenOnce((uri) {
+    _listenFor(state, (uri) {
       if (uri.host == 'wallet-connected') {
         final q = uri.queryParameters;
         completer.complete(Wallet(
@@ -53,7 +56,7 @@ class WalletConnectService {
       }
     });
 
-    final uri = Uri.parse('$baseUrl/mobile/connect');
+    final uri = Uri.parse('$baseUrl/mobile/connect').replace(queryParameters: {'state': state});
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched) {
       _sub?.cancel();
@@ -72,8 +75,9 @@ class WalletConnectService {
   /// Opens /mobile/action for one create/reserve/claim call and resolves
   /// once bitshada://action-done or action-error comes back.
   Future<ActionResult> runAction(Map<String, String> params) async {
+    final state = _newState();
     final completer = Completer<ActionResult>();
-    _listenOnce((uri) {
+    _listenFor(state, (uri) {
       if (uri.host == 'action-done') {
         final q = uri.queryParameters;
         completer.complete(ActionResult(ok: true, action: q['action'] ?? '', txHash: q['tx_hash']));
@@ -83,7 +87,7 @@ class WalletConnectService {
       }
     });
 
-    final uri = Uri.parse('$baseUrl/mobile/action').replace(queryParameters: params);
+    final uri = Uri.parse('$baseUrl/mobile/action').replace(queryParameters: {...params, 'state': state});
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched) {
       _sub?.cancel();
@@ -99,10 +103,21 @@ class WalletConnectService {
     );
   }
 
-  void _listenOnce(void Function(Uri uri) onLink) {
+  /// Random per-request token, echoed back verbatim by the web page in
+  /// its redirect (see mobile_connect_live.ex/mobile_action_live.ex).
+  /// Without this, `uriLinkStream`'s first listener can be handed a
+  /// STALE link the platform is still holding onto from an earlier
+  /// launch/resume (observed for real: a manually-fired test intent
+  /// sent before this service had ever subscribed was still replayed
+  /// to the very next listener) -- matching on `state` means a stale or
+  /// unrelated link is silently ignored instead of being mistaken for
+  /// this call's own result.
+  String _newState() => List.generate(16, (_) => _rng.nextInt(16).toRadixString(16)).join();
+
+  void _listenFor(String expectedState, void Function(Uri uri) onLink) {
     _sub?.cancel();
     _sub = _appLinks.uriLinkStream.listen((uri) {
-      if (uri.scheme == 'bitshada') {
+      if (uri.scheme == 'bitshada' && uri.queryParameters['state'] == expectedState) {
         onLink(uri);
         _sub?.cancel();
       }
