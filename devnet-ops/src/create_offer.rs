@@ -30,7 +30,19 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 
-const AMOUNT: i64 = 25_000; // KES minor units, matching the claim step's own constant
+const DEFAULT_AMOUNT: i64 = 25_000; // KES minor units, matching the claim step's own constant
+
+/// Overridable via `OFFER_AMOUNT_KES_MINOR`/`OFFER_RECIPIENT_BYTE` so this
+/// tool can seed several visually distinct pilot offers instead of
+/// identical duplicates (the original hardcoded AMOUNT/recipient_hash
+/// meant every run produced the exact same escrow_args, so two offers
+/// would render as two cards with identical numbers).
+fn amount() -> i64 {
+    std::env::var("OFFER_AMOUNT_KES_MINOR").ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_AMOUNT)
+}
+fn recipient_byte() -> u8 {
+    std::env::var("OFFER_RECIPIENT_BYTE").ok().and_then(|v| v.parse().ok()).unwrap_or(7)
+}
 
 fn ownership_message(recipient_hash: &[u8; 32]) -> [u8; 33] {
     let mut message = [0u8; 33];
@@ -73,7 +85,7 @@ fn main() {
         let bytes = hex::decode(hex_key).unwrap();
         EthSigner { key: k256::ecdsa::SigningKey::from_bytes(bytes.as_slice().into()).unwrap() }
     };
-    let recipient_hash = [7u8; 32]; // matches the earlier free-standing mint's own choice
+    let recipient_hash = [recipient_byte(); 32];
 
     let mut guard_args = Vec::with_capacity(52);
     guard_args.extend_from_slice(&verifier.address());
@@ -98,7 +110,8 @@ fn main() {
     let mut escrow_args = Vec::with_capacity(124);
     escrow_args.extend_from_slice(&verifier.address());
     escrow_args.extend_from_slice(&recipient_hash);
-    escrow_args.extend_from_slice(&AMOUNT.to_le_bytes());
+    let amount = amount();
+    escrow_args.extend_from_slice(&amount.to_le_bytes());
     escrow_args.extend_from_slice(&registry_type_hash);
     escrow_args.extend_from_slice(&guard_type_hash);
     assert_eq!(escrow_args.len(), 124);
@@ -152,7 +165,7 @@ fn main() {
     let result = json!({
         "tx_hash": tx_hash,
         "escrow_output_index": 1,
-        "amount": AMOUNT,
+        "amount": amount,
         "recipient_hash": format!("0x{}", hex::encode(recipient_hash)),
         "verifier_address": format!("0x{}", hex::encode(verifier.address())),
         "escrow_lock_script": {
