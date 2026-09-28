@@ -164,50 +164,32 @@ class _OffersScreenState extends State<OffersScreen> {
             ),
       body: Column(
         children: [
-          Container(
-            width: double.infinity,
-            color: scheme.tertiaryContainer,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.science_outlined, size: 16, color: scheme.onTertiaryContainer),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Testnet pilot -- test CKB only, no real money.',
-                    style: TextStyle(fontSize: 12, color: scheme.onTertiaryContainer),
-                  ),
-                ),
-              ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+            child: _AttentionBox(
+              icon: Icons.science_outlined,
+              color: scheme.tertiary,
+              text: 'Testnet pilot -- test CKB only, no real money.',
             ),
           ),
           if (_connectedWallet != null && _connectedWallet!.balanceCkb < 10)
-            Container(
-              width: double.infinity,
-              color: scheme.secondaryContainer,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
-                'Your wallet needs testnet CKB. Tap your balance above to copy the address, then email it to '
-                'kenneth.njoroge@quantumke.org for a top-up.',
-                style: TextStyle(fontSize: 12, color: scheme.onSecondaryContainer),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: _AttentionBox(
+                icon: Icons.info_outline,
+                color: scheme.secondary,
+                text: 'Your wallet needs testnet CKB. Tap your balance above to copy the address, then email it to '
+                    'kenneth.njoroge@quantumke.org for a top-up.',
               ),
             ),
           if (_actionError != null)
-            Container(
-              width: double.infinity,
-              color: scheme.errorContainer,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(_actionError!, style: TextStyle(fontSize: 12, color: scheme.onErrorContainer)),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 16),
-                    onPressed: () => setState(() => _actionError = null),
-                    color: scheme.onErrorContainer,
-                  ),
-                ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: _AttentionBox(
+                icon: Icons.error_outline,
+                color: scheme.error,
+                text: _actionError!,
+                onDismiss: () => setState(() => _actionError = null),
               ),
             ),
           Expanded(
@@ -312,6 +294,90 @@ class _WalletButton extends StatelessWidget {
   }
 }
 
+/// Dashed-border outlined notice, inspired by the "Attention" pattern in
+/// dark-mode P2P crypto app references: an outline on the dark surface
+/// reads as a warning without the heavier solid-fill container blocks
+/// used before, which felt more like a full-width toast than an inline
+/// notice.
+class _AttentionBox extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String text;
+  final VoidCallback? onDismiss;
+  const _AttentionBox({required this.icon, required this.color, required this.text, this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DottedBorderBox(
+      color: color.withValues(alpha: 0.5),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 10),
+            Expanded(child: Text(text, style: TextStyle(fontSize: 12.5, color: scheme.onSurface, height: 1.35))),
+            if (onDismiss != null)
+              InkWell(
+                onTap: onDismiss,
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Icon(Icons.close, size: 16, color: scheme.onSurfaceVariant),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A dashed rounded-rect border, drawn with CustomPaint since Flutter has
+/// no built-in dashed BoxBorder -- lightweight, no new package needed.
+class DottedBorderBox extends StatelessWidget {
+  final Color color;
+  final Widget child;
+  const DottedBorderBox({required this.color, required this.child, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _DashedRRectPainter(color: color),
+      child: child,
+    );
+  }
+}
+
+class _DashedRRectPainter extends CustomPainter {
+  final Color color;
+  _DashedRRectPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(12));
+    final path = Path()..addRRect(rrect);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    const dashWidth = 5.0;
+    const gapWidth = 4.0;
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = distance + dashWidth;
+        canvas.drawPath(metric.extractPath(distance, next.clamp(0, metric.length)), paint);
+        distance = next + gapWidth;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRRectPainter oldDelegate) => oldDelegate.color != color;
+}
+
 class _OfferCard extends StatefulWidget {
   final Offer offer;
   final Wallet? wallet;
@@ -376,45 +442,100 @@ class _OfferCardState extends State<_OfferCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Leading circular status badge + amount, mirroring the
+                // avatar-led row pattern from the P2P marketplace
+                // reference -- a badge reads faster than a text pill at a
+                // glance down a list.
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(999)),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.16), shape: BoxShape.circle),
+                      child: Icon(isOpen ? Icons.lock_open_rounded : Icons.hourglass_top_rounded, size: 18, color: statusColor),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(width: 6, height: 6, decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle)),
-                          const SizedBox(width: 5),
-                          Text(offer.status, style: bitshadaMono(context, fontSize: 11, fontWeight: FontWeight.w600, color: statusColor)),
+                          Text(offer.status.toUpperCase(),
+                              style: bitshadaMono(context, fontSize: 10.5, fontWeight: FontWeight.w600, color: statusColor)),
+                          Text('${offer.amountKes.toStringAsFixed(2)} KES',
+                              style: bitshadaMono(context, fontSize: 21, fontWeight: FontWeight.w700)),
                         ],
                       ),
                     ),
-                    Text(offer.shortCell, style: bitshadaMono(context, fontSize: 11, color: scheme.onSurfaceVariant)),
+                    Text(offer.shortCell, style: bitshadaMono(context, fontSize: 10.5, color: scheme.onSurfaceVariant)),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text('${offer.amountKes.toStringAsFixed(2)} KES', style: bitshadaMono(context, fontSize: 22, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 2),
-                Text('${offer.capacityCkb.toStringAsFixed(2)} CKB locked in escrow',
-                    style: bitshadaMono(context, fontSize: 13, color: scheme.onSurfaceVariant)),
-                const SizedBox(height: 2),
-                Text('Recipient: ${offer.shortRecipient}', style: bitshadaMono(context, fontSize: 11, color: scheme.onSurfaceVariant)),
+                const SizedBox(height: 12),
+                // Receipt-style label/value rows, same convention the
+                // reference uses for Crypto/Value/FIAT Value.
+                _DetailRow(label: 'Locked in escrow', value: '${offer.capacityCkb.toStringAsFixed(2)} CKB'),
+                const SizedBox(height: 6),
+                _DetailRow(label: 'Recipient', value: offer.shortRecipient),
                 if (canReserve || canClaim || reservedByOther) ...[
-                  const SizedBox(height: 10),
-                  if (canReserve)
-                    SizedBox(width: double.infinity, height: 48, child: FilledButton(onPressed: widget.onReserve, child: const Text('Reserve'))),
-                  if (canClaim)
-                    SizedBox(width: double.infinity, height: 48, child: FilledButton(onPressed: widget.onClaim, child: const Text('Claim'))),
-                  if (reservedByOther)
-                    Center(child: Text('Reserved by another buyer', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant))),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      if (reservedByOther)
+                        Expanded(
+                          child: Text('Reserved by another buyer',
+                              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                        ),
+                      if (canReserve)
+                        SizedBox(
+                          height: 44,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 22),
+                                shape: const StadiumBorder()),
+                            onPressed: widget.onReserve,
+                            child: const Text('Reserve'),
+                          ),
+                        ),
+                      if (canClaim)
+                        SizedBox(
+                          height: 44,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 22),
+                                shape: const StadiumBorder()),
+                            onPressed: widget.onClaim,
+                            child: const Text('Claim'),
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Muted label / bold mono value row, the receipt-style detail line used
+/// throughout the P2P reference's payment/order screens.
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _DetailRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant)),
+        Text(value, style: bitshadaMono(context, fontSize: 12.5, fontWeight: FontWeight.w600)),
+      ],
     );
   }
 }
