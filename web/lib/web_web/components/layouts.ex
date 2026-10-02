@@ -50,6 +50,9 @@ defmodule WebWeb.Layouts do
       <div class="flex-none">
         <ul class="flex flex-column px-1 space-x-2 items-center">
           <li>
+            <a href="/feedback" class="btn btn-ghost btn-sm">Feedback</a>
+          </li>
+          <li>
             <a
               href="https://github.com/kenkomu/ckb-mpesa-onramp"
               target="_blank"

@@ -19,6 +19,7 @@ defmodule WebWeb.Router do
 
     live "/", OffersLive
     live "/offers", OffersLive
+    live "/feedback", FeedbackLive
 
     # Mobile app handoff pages -- opened in the system browser via
     # url_launcher, never an embedded WebView, per the project plan's

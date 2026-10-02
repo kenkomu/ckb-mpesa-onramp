@@ -24,6 +24,7 @@ defmodule WebWeb.OffersLive do
     {:ok,
      socket
      |> assign(wallet: nil, wallet_error: nil, busy: nil, notice: nil, tx_error: nil)
+     |> assign(faucet_busy: false, faucet_notice: nil, faucet_error: nil)
      |> assign(create_form: to_form(%{"identifier" => "", "amount" => ""}))
      |> load_offers()}
   end
@@ -32,12 +33,35 @@ defmodule WebWeb.OffersLive do
     {:noreply, socket |> assign(notice: nil, tx_error: nil) |> load_offers()}
   end
 
-  def handle_event("wallet_ready", %{"address" => address, "lockHash" => lock_hash, "balanceCkb" => balance_ckb}, socket) do
-    {:noreply, assign(socket, wallet: %{address: address, lock_hash: lock_hash, balance_ckb: balance_ckb}, wallet_error: nil)}
+  def handle_event(
+        "wallet_ready",
+        %{"address" => address, "lockHash" => lock_hash, "balanceCkb" => balance_ckb, "lockArgs" => lock_args},
+        socket
+      ) do
+    wallet = %{address: address, lock_hash: lock_hash, balance_ckb: balance_ckb, lock_args: lock_args}
+    {:noreply, assign(socket, wallet: wallet, wallet_error: nil)}
   end
 
   def handle_event("wallet_error", %{"message" => message}, socket) do
     {:noreply, assign(socket, wallet_error: message)}
+  end
+
+  def handle_event("request_faucet", _params, socket) do
+    case socket.assigns.wallet do
+      nil ->
+        {:noreply, socket}
+
+      wallet ->
+        # Real testnet commits have taken 15-30s+ in this project's own
+        # testing, and Web.Ckb.Faucet.request/1 blocks on that -- run it
+        # via start_async so the `faucet_busy` spinner actually renders
+        # right away instead of the whole handle_event blocking before
+        # LiveView gets a chance to push the diff.
+        {:noreply,
+         socket
+         |> assign(faucet_busy: true, faucet_notice: nil, faucet_error: nil)
+         |> start_async(:faucet, fn -> Web.Ckb.Faucet.request(wallet.lock_args) end)}
+    end
   end
 
   def handle_event("create_offer", %{"identifier" => identifier, "amount" => amount_kes}, socket) do
@@ -89,6 +113,27 @@ defmodule WebWeb.OffersLive do
 
   def handle_event("tx_error", %{"action" => action, "message" => message}, socket) do
     {:noreply, assign(socket, busy: nil, notice: nil, tx_error: "#{action_label(action)} failed: #{message}")}
+  end
+
+  def handle_async(:faucet, {:ok, result}, socket) do
+    socket =
+      case result do
+        {:ok, tx_hash} ->
+          assign(socket, faucet_busy: false, faucet_notice: "Sent 300 testnet CKB: #{tx_hash}")
+
+        {:error, :cooldown, seconds_remaining} ->
+          hours = div(seconds_remaining, 3600)
+          assign(socket, faucet_busy: false, faucet_error: "Already funded recently -- try again in about #{hours + 1}h.")
+
+        {:error, reason} ->
+          assign(socket, faucet_busy: false, faucet_error: "#{reason}")
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_async(:faucet, {:exit, reason}, socket) do
+    {:noreply, assign(socket, faucet_busy: false, faucet_error: "Faucet request failed: #{inspect(reason)}")}
   end
 
   defp action_label("create"), do: "Create"
@@ -147,25 +192,22 @@ defmodule WebWeb.OffersLive do
 
       <div :if={@wallet && @wallet.balance_ckb < 10} class="alert bg-info/10 border border-info/30 shadow-sm">
         <.icon name="hero-information-circle" class="size-5 text-info" />
-        <div class="text-sm">
+        <div class="text-sm flex-1">
           <strong>Your wallet needs testnet CKB before you can create, reserve, or claim an offer.</strong>
-          <div class="mt-1">
-            Copy your address
-            <button
-              type="button"
-              class="font-mono underline decoration-dotted"
-              onclick={"navigator.clipboard.writeText('#{@wallet.address}')"}
-            >
-              {short_hash(@wallet.address)}
-            </button>
-            and email it to
-            <a
-              class="link"
-              href={"mailto:kenneth.njoroge@quantumke.org?subject=Bitshada%20testnet%20funding&body=Please%20fund%20my%20wallet%3A%20" <> @wallet.address}
-            >kenneth.njoroge@quantumke.org</a>
-            &mdash; you'll get a small top-up so you can actually try the flow.
-          </div>
+          <div class="mt-1">Tap below for an instant, free top-up -- no need to ask anyone.</div>
         </div>
+        <.button phx-click="request_faucet" disabled={@faucet_busy} phx-disable-with="Sending..." class="btn-primary btn-sm">
+          <span :if={@faucet_busy} class="loading loading-spinner loading-xs"></span>
+          {if @faucet_busy, do: "Sending...", else: "Get testnet CKB"}
+        </.button>
+      </div>
+      <div :if={@faucet_notice} class="alert alert-success shadow-sm">
+        <.icon name="hero-check-circle" class="size-5" />
+        <span class="font-mono text-sm break-all">{@faucet_notice}</span>
+      </div>
+      <div :if={@faucet_error} class="alert bg-warning/10 border border-warning/30 shadow-sm">
+        <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
+        <span class="text-sm">{@faucet_error}</span>
       </div>
 
       <div :if={@notice} class="alert alert-success shadow-sm">

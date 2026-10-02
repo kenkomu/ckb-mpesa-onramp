@@ -64,6 +64,22 @@ if System.get_env("CKB_NETWORK") == "testnet" do
         "BITSHADA_VERIFIER_PRIVATE_KEY",
         "0xf772d0917cd21824b6259816aa2da2a9675e7ff25b8a5e41703c34cb6d05a30e"
       )
+
+  # Self-serve testnet funding: shells out to devnet-ops's own
+  # `fund_lock_args` binary (see Web.Ckb.Faucet's moduledoc for why this
+  # reuses that tool rather than reimplementing CKB tx signing in
+  # Elixir). `data_dir` must contain a funded `faucet_key.txt` -- not
+  # committed to git, provisioned directly on the VPS.
+  # __DIR__ is web/config -- devnet-ops is a sibling of web/ at the repo root.
+  devnet_ops_dir = System.get_env("BITSHADA_DEVNET_OPS_DIR", Path.expand("../../devnet-ops", __DIR__))
+
+  config :web, :faucet,
+    binary_path: Path.join(devnet_ops_dir, "target/release/fund_lock_args"),
+    devnet_ops_dir: devnet_ops_dir,
+    data_dir: Path.join(devnet_ops_dir, "faucet_data"),
+    rpc_url: "https://testnet.ckb.dev/",
+    sighash_dep_group_tx_hash: "0xf8de3bb47d055cdf460d93a2a6e1b05f7432f9777c8c474abf4eec1d4aee5d37",
+    sighash_dep_group_index: 0
 end
 
 if config_env() == :dev do

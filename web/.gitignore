@@ -35,6 +35,9 @@ web-*.tar
 # not something to version control.
 /priv/static/downloads/
 
+# Pilot tester feedback -- real user data, stays on the VPS only.
+/priv/feedback/
+
 # In case you use Node.js/npm, you want to ignore these.
 npm-debug.log
 /assets/node_modules/

@@ -178,8 +178,8 @@ class _OffersScreenState extends State<OffersScreen> {
               child: _AttentionBox(
                 icon: Icons.info_outline,
                 color: scheme.secondary,
-                text: 'Your wallet needs testnet CKB. Tap your balance above to copy the address, then email it to '
-                    'kenneth.njoroge@quantumke.org for a top-up.',
+                text: 'Your wallet needs testnet CKB. Open the Bitshada website in your browser and tap '
+                    '"Get testnet CKB" for an instant top-up -- no need to email anyone.',
               ),
             ),
           if (_actionError != null)

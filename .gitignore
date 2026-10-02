@@ -25,3 +25,8 @@
 # CKB_DATA_DIR in devnet-ops/src/lib.rs's data_dir(). Real testnet key
 # and tx-hash state, kept out of git the same way the devnet files are.
 /devnet-ops/testnet_data/
+
+# The Bitshada faucet's own funded testnet key (Web.Ckb.Faucet shells
+# out to fund_lock_args with CKB_DATA_DIR pointed here) -- same reasoning
+# as testnet_data/ above, provisioned directly on the VPS, never in git.
+/devnet-ops/faucet_data/

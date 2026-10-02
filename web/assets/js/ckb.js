@@ -115,6 +115,10 @@ export async function walletInfo() {
   const balanceShannon = await getCapacityByLock(config, addressObj.script);
   return {
     lockHash: addressObj.script.hash(),
+    // The faucet (Web.Ckb.Faucet) needs the raw 20-byte sighash args, not
+    // the full lock hash -- `fund_lock_args` builds its own sighash lock
+    // script from this directly, the same way devnet-ops always has.
+    lockArgs: addressObj.script.args,
     address: addressObj.toString(),
     balanceCkb: Number(balanceShannon) / 100_000_000,
   };
