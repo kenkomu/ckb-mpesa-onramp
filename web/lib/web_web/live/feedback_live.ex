@@ -43,6 +43,7 @@ defmodule WebWeb.FeedbackLive do
 
   def render(assigns) do
     ~H"""
+    <Layouts.app flash={@flash}>
     <div id="wallet" phx-hook="Wallet" class="max-w-xl mx-auto space-y-6">
       <div>
         <div class="font-mono text-xs uppercase tracking-widest text-primary font-semibold mb-1">
@@ -90,6 +91,7 @@ defmodule WebWeb.FeedbackLive do
         </div>
       </div>
     </div>
+    </Layouts.app>
     """
   end
 end

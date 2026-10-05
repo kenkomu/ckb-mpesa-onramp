@@ -150,6 +150,7 @@ defmodule WebWeb.OffersLive do
 
   def render(assigns) do
     ~H"""
+    <Layouts.app flash={@flash}>
     <div id="wallet" phx-hook="Wallet" class="space-y-8">
       <div class="alert bg-warning/10 border border-warning/30 text-warning-content shadow-sm">
         <.icon name="hero-beaker" class="size-5 text-warning" />
@@ -366,6 +367,7 @@ defmodule WebWeb.OffersLive do
         </.button>
       </div>
     </div>
+    </Layouts.app>
     """
   end
 
