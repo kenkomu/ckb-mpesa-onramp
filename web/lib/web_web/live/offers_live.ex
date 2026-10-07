@@ -119,7 +119,9 @@ defmodule WebWeb.OffersLive do
     socket =
       case result do
         {:ok, tx_hash} ->
-          assign(socket, faucet_busy: false, faucet_notice: "Sent 300 testnet CKB: #{tx_hash}")
+          socket
+          |> assign(faucet_busy: false, faucet_notice: "Sent 300 testnet CKB: #{tx_hash}")
+          |> push_event("refresh_wallet", %{})
 
         {:error, :cooldown, seconds_remaining} ->
           hours = div(seconds_remaining, 3600)
@@ -172,17 +174,23 @@ defmodule WebWeb.OffersLive do
 
         <div class="card bg-base-200 border border-base-300 shadow-sm">
           <div class="card-body py-3 px-4 min-w-56">
-            <div :if={@wallet} class="flex items-center gap-3">
+            <button
+              :if={@wallet}
+              type="button"
+              title="Tap to copy your full wallet address"
+              class="flex items-center gap-3 cursor-pointer"
+              onclick={"navigator.clipboard.writeText('#{@wallet.address}')"}
+            >
               <span class="relative flex size-2.5">
                 <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60">
                 </span>
                 <span class="relative inline-flex size-2.5 rounded-full bg-success"></span>
               </span>
               <div class="text-right ml-auto">
-                <div class="font-mono text-xs text-base-content/60">{short_hash(@wallet.address)}</div>
+                <div class="font-mono text-xs text-base-content/60 underline decoration-dotted">{short_hash(@wallet.address)}</div>
                 <div class="font-mono font-semibold tabular-nums">{format_ckb(@wallet.balance_ckb)} CKB</div>
               </div>
-            </div>
+            </button>
             <div :if={@wallet == nil and @wallet_error == nil} class="flex items-center gap-2 text-sm text-base-content/60">
               <span class="loading loading-spinner loading-xs"></span> Connecting wallet...
             </div>
@@ -376,5 +384,12 @@ defmodule WebWeb.OffersLive do
   defp format_ckb(ckb), do: :erlang.float_to_binary(ckb / 1, decimals: 2)
 
   defp short_hash("0x" <> hex), do: "0x" <> String.slice(hex, 0, 8) <> "..."
+
+  # CKB wallet addresses are bech32m (e.g. "ckt1qzda0c...", ~97 chars),
+  # not 0x-prefixed hex, so they fell straight through to the catch-all
+  # clause below and rendered in full -- overflowing the wallet-status
+  # card on narrow screens instead of the short form every other hash
+  # on this page gets.
+  defp short_hash(other) when is_binary(other) and byte_size(other) > 14, do: String.slice(other, 0, 10) <> "..."
   defp short_hash(other), do: other
 end

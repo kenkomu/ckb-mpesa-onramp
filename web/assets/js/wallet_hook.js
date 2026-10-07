@@ -36,6 +36,12 @@ export const Wallet = {
         window.location.href = url;
       }, 900);
     });
+
+    // The faucet is pure server-side (no client signing, so it never
+    // goes through run()'s own post-action refreshWallet() call below)
+    // -- without this, a successful faucet top-up left the displayed
+    // balance stuck at its pre-funding value until a manual page reload.
+    this.handleEvent("refresh_wallet", () => this.refreshWallet());
   },
 
   async refreshWallet() {
