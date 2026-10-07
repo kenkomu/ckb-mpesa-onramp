@@ -84,6 +84,11 @@ class BitshadaApp extends StatelessWidget {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
         ),
       ),
+      // Light is the app's default regardless of device setting, matching
+      // the web app's own default -- both surfaces should greet a new
+      // user the same way rather than one silently following system dark
+      // mode and the other not.
+      themeMode: ThemeMode.light,
       home: const OffersScreen(),
     );
   }

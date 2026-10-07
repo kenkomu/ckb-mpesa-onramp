@@ -25,8 +25,19 @@
             document.documentElement.setAttribute("data-theme-source", "user");
           }
         };
+        // Light is the app's default regardless of OS preference -- a
+        // first-time visitor always sees light mode and has to opt into
+        // dark via the toggle, rather than silently inheriting whatever
+        // their device happens to be set to. Explicit "system"/"dark"
+        // choices (saved below, "user" source) are still respected.
         if (!document.documentElement.hasAttribute("data-theme")) {
-          setTheme(localStorage.getItem("phx:theme") || "system");
+          const stored = localStorage.getItem("phx:theme");
+          if (stored) {
+            setTheme(stored);
+          } else {
+            document.documentElement.setAttribute("data-theme", "light");
+            document.documentElement.setAttribute("data-theme-source", "user");
+          }
         }
         window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
