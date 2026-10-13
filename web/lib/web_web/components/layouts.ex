@@ -35,7 +35,7 @@ defmodule WebWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8 border-b border-base-300">
+    <header class="navbar flex-wrap gap-y-2 px-4 sm:px-6 lg:px-8 border-b border-base-300">
       <div class="flex-1">
         <a href="/" class="flex-1 flex w-fit items-center gap-2.5">
           <.brand_mark class="size-7" />
@@ -48,16 +48,16 @@ defmodule WebWeb.Layouts do
         </a>
       </div>
       <div class="flex-none">
-        <ul class="flex flex-column px-1 space-x-2 items-center">
+        <ul class="flex flex-wrap px-1 gap-1 sm:gap-2 items-center">
           <li>
-            <a href="/feedback" class="btn btn-ghost btn-sm">Feedback</a>
+            <a href="/feedback" class="btn btn-ghost btn-xs sm:btn-sm">Feedback</a>
           </li>
           <li>
             <a
               href="https://github.com/kenkomu/ckb-mpesa-onramp"
               target="_blank"
               rel="noopener"
-              class="btn btn-ghost btn-sm"
+              class="btn btn-ghost btn-xs sm:btn-sm"
             >
               GitHub
             </a>

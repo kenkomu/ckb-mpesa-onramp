@@ -104,6 +104,11 @@
    so they read as exact values rather than prose. */
 body {
   font-family: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+  /* Belt-and-braces against any one element overflowing its container
+     on a narrow phone viewport (found via the navbar's nav list doing
+     exactly this -- see layouts.ex) silently turning into page-wide
+     horizontal scroll instead of just looking wrong locally. */
+  overflow-x: hidden;
 }
 h1, h2, h3, .font-display {
   font-family: "Source Serif 4", ui-serif, Georgia, serif;
