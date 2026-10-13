@@ -1,8 +1,8 @@
 defmodule WebWeb.PageControllerTest do
   use WebWeb.ConnCase
 
-  test "GET /", %{conn: conn} do
+  test "GET / renders the offers marketplace", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert html_response(conn, 200) =~ "Peace of mind from prototype to production"
+    assert html_response(conn, 200) =~ "Open offers"
   end
 end
