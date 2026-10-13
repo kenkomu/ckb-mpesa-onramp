@@ -6,9 +6,10 @@ import '../models/offer.dart';
 /// the web app's ckb.js talks to (see web/lib/web_web/controllers/api/).
 /// This app never holds a private key and never signs anything itself;
 /// wallet-connect and transaction signing happen by handing off to an
-/// in-app browser tab (see wallet_connect.dart), matching the plan's
+/// embedded WebView screen (see wallet_connect.dart), matching the plan's
 /// documented "hop out to a URL, come back via deep link" pattern for
-/// platforms with no native CKB wallet SDK.
+/// platforms with no native CKB wallet SDK -- just rendered inside this
+/// app's own UI instead of a separate browser window.
 class BitshadaApi {
   final String baseUrl;
 

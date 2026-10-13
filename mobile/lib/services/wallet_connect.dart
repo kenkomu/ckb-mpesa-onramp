@@ -1,23 +1,22 @@
-import 'dart:async';
 import 'dart:math';
-import 'package:app_links/app_links.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/widgets.dart';
+import '../screens/wallet_webview_screen.dart';
 
 /// The mobile half of the project plan's documented wallet-connect
 /// pattern: no native Dart/CKB wallet SDK exists (JoyID's own "Native
 /// App" docs are still a stub), so this app never touches a private
-/// key itself. Instead it opens Bitshada's own web pages in an IN-APP
-/// BROWSER TAB (LaunchMode.inAppBrowserView -- a real Chrome Custom Tab
-/// on Android / SFSafariViewController on iOS, not a plain embedded
-/// WebView) so the real browser engine the user already trusts handles
-/// the actual signing, via the same ckb.js the web marketplace uses,
-/// while the user visually never leaves this app -- the tab slides up
-/// as an overlay over OffersScreen and closes itself (or gets
-/// dismissed) once the bitshada:// redirect lands, instead of
-/// switching to a separate browser app the way
-/// LaunchMode.externalApplication used to. See
+/// key itself. Instead it opens Bitshada's own web pages in an
+/// EMBEDDED WEBVIEW (WalletWebViewScreen) hosted directly inside this
+/// app's own widget tree -- no browser chrome, no address bar, just a
+/// themed loading state while the real browser engine the user already
+/// trusts handles the actual signing, via the same ckb.js the web
+/// marketplace uses. The page's own `bitshada://...` redirect is
+/// intercepted as a WebView navigation event (not a system deep link),
+/// so this stays entirely within the current screen push -- no global
+/// stream listener, no stale-link risk. See
 /// web/lib/web_web/live/mobile_connect_live.ex and mobile_action_live.ex
-/// for the other half of this handshake.
+/// for the other half of this handshake, and wallet_webview_screen.dart
+/// for the embedded-WebView mechanics and its Custom Tab fallback.
 class Wallet {
   final String address;
   final String lockHash;
@@ -37,99 +36,54 @@ class ActionResult {
 
 class WalletConnectService {
   final String baseUrl;
-  final _appLinks = AppLinks();
   final _rng = Random.secure();
-  StreamSubscription<Uri>? _sub;
 
   WalletConnectService({this.baseUrl = 'https://api.bitshada.com'});
 
-  /// Opens the connect page and resolves once bitshada://wallet-connected
-  /// (or an error) comes back. Call once per app session; the same
-  /// browser tab/profile keeps its own wallet across repeat connects,
-  /// same as the web app's own localStorage-persisted signer.
-  Future<Wallet> connect() async {
-    final state = _newState();
-    final completer = Completer<Wallet>();
-    _listenFor(state, (uri) {
-      if (uri.host == 'wallet-connected') {
-        final q = uri.queryParameters;
-        completer.complete(Wallet(
-          address: q['address'] ?? '',
-          lockHash: q['lockHash'] ?? '',
-          balanceCkb: double.tryParse(q['balanceCkb'] ?? '0') ?? 0,
-        ));
-      }
-    });
+  /// Opens the connect page in an embedded WebView and resolves once it
+  /// redirects to bitshada://wallet-connected (or the user backs out).
+  /// Call once per app session; the same WebView's own storage keeps its
+  /// wallet across repeat connects, same as the web app's own
+  /// localStorage-persisted signer.
+  Future<Wallet> connect(BuildContext context) async {
+    final uri = Uri.parse('$baseUrl/mobile/connect').replace(queryParameters: {'state': _newState()});
+    final result = await WalletWebViewScreen.open(context, url: uri, loadingLabel: 'Connecting wallet...');
 
-    final uri = Uri.parse('$baseUrl/mobile/connect').replace(queryParameters: {'state': state});
-    final launched = await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
-    if (!launched) {
-      _sub?.cancel();
-      throw Exception('Could not open the browser to connect a wallet.');
+    if (result == null || result.host != 'wallet-connected') {
+      throw Exception('Wallet connect was cancelled.');
     }
-
-    return completer.future.timeout(
-      const Duration(minutes: 5),
-      onTimeout: () {
-        _sub?.cancel();
-        throw Exception('Wallet connect timed out -- try again.');
-      },
+    final q = result.queryParameters;
+    return Wallet(
+      address: q['address'] ?? '',
+      lockHash: q['lockHash'] ?? '',
+      balanceCkb: double.tryParse(q['balanceCkb'] ?? '0') ?? 0,
     );
   }
 
-  /// Opens /mobile/action for one create/reserve/claim call and resolves
-  /// once bitshada://action-done or action-error comes back.
-  Future<ActionResult> runAction(Map<String, String> params) async {
-    final state = _newState();
-    final completer = Completer<ActionResult>();
-    _listenFor(state, (uri) {
-      if (uri.host == 'action-done') {
-        final q = uri.queryParameters;
-        completer.complete(ActionResult(ok: true, action: q['action'] ?? '', txHash: q['tx_hash']));
-      } else if (uri.host == 'action-error') {
-        final q = uri.queryParameters;
-        completer.complete(ActionResult(ok: false, action: q['action'] ?? '', message: q['message']));
-      }
-    });
+  /// Opens /mobile/action in an embedded WebView for one create/reserve/
+  /// claim call and resolves once it redirects to bitshada://action-done
+  /// or action-error.
+  Future<ActionResult> runAction(BuildContext context, Map<String, String> params) async {
+    final uri = Uri.parse('$baseUrl/mobile/action').replace(queryParameters: {...params, 'state': _newState()});
+    final result = await WalletWebViewScreen.open(context, url: uri, loadingLabel: 'Submitting to the chain...');
 
-    final uri = Uri.parse('$baseUrl/mobile/action').replace(queryParameters: {...params, 'state': state});
-    final launched = await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
-    if (!launched) {
-      _sub?.cancel();
-      throw Exception('Could not open the browser to complete this action.');
+    if (result == null) {
+      throw Exception('Cancelled -- nothing was submitted.');
     }
-
-    return completer.future.timeout(
-      const Duration(minutes: 5),
-      onTimeout: () {
-        _sub?.cancel();
-        throw Exception('Timed out waiting for the browser -- try again.');
-      },
-    );
+    if (result.host == 'action-done') {
+      final q = result.queryParameters;
+      return ActionResult(ok: true, action: q['action'] ?? '', txHash: q['tx_hash']);
+    }
+    final q = result.queryParameters;
+    return ActionResult(ok: false, action: q['action'] ?? '', message: q['message']);
   }
 
   /// Random per-request token, echoed back verbatim by the web page in
   /// its redirect (see mobile_connect_live.ex/mobile_action_live.ex).
-  /// Without this, `uriLinkStream`'s first listener can be handed a
-  /// STALE link the platform is still holding onto from an earlier
-  /// launch/resume (observed for real: a manually-fired test intent
-  /// sent before this service had ever subscribed was still replayed
-  /// to the very next listener) -- matching on `state` means a stale or
-  /// unrelated link is silently ignored instead of being mistaken for
-  /// this call's own result.
+  /// No longer load-bearing for this client (the embedded WebView's
+  /// navigation intercept is already scoped to this one screen push,
+  /// so there's no shared stream to replay a stale link into) -- kept
+  /// so the page's existing echo-back query shape doesn't need to
+  /// change server-side.
   String _newState() => List.generate(16, (_) => _rng.nextInt(16).toRadixString(16)).join();
-
-  void _listenFor(String expectedState, void Function(Uri uri) onLink) {
-    _sub?.cancel();
-    _sub = _appLinks.uriLinkStream.listen((uri) {
-      if (uri.scheme == 'bitshada' && uri.queryParameters['state'] == expectedState) {
-        onLink(uri);
-        _sub?.cancel();
-      }
-    });
-  }
-
-  void dispose() {
-    _sub?.cancel();
-  }
 }

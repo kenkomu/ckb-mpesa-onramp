@@ -7,7 +7,7 @@ import '../services/wallet_connect.dart';
 
 /// The marketplace screen: browse, create, reserve, and claim offers.
 /// This app never signs anything itself -- every action that needs a
-/// signature hands off to an in-app browser tab (WalletConnectService,
+/// signature hands off to an embedded WebView screen (WalletConnectService,
 /// which reuses the exact same ckb.js the web app uses) and waits for
 /// the bitshada:// redirect. See wallet_connect.dart's own header
 /// comment for why.
@@ -33,12 +33,6 @@ class _OffersScreenState extends State<OffersScreen> {
     _offersFuture = _api.listOffers();
   }
 
-  @override
-  void dispose() {
-    _wallet.dispose();
-    super.dispose();
-  }
-
   Future<void> _refreshOffers() async {
     setState(() => _offersFuture = _api.listOffers());
     await _offersFuture;
@@ -50,7 +44,7 @@ class _OffersScreenState extends State<OffersScreen> {
       _actionError = null;
     });
     try {
-      final wallet = await _wallet.connect();
+      final wallet = await _wallet.connect(context);
       if (!mounted) return;
       setState(() => _connectedWallet = wallet);
     } catch (e) {
@@ -64,7 +58,7 @@ class _OffersScreenState extends State<OffersScreen> {
   Future<void> _runAction(Map<String, String> params) async {
     setState(() => _actionError = null);
     try {
-      final result = await _wallet.runAction(params);
+      final result = await _wallet.runAction(context, params);
       if (!mounted) return;
       if (result.ok) {
         await _refreshOffers();
