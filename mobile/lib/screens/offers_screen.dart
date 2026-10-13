@@ -7,7 +7,7 @@ import '../services/wallet_connect.dart';
 
 /// The marketplace screen: browse, create, reserve, and claim offers.
 /// This app never signs anything itself -- every action that needs a
-/// signature hands off to the system browser (WalletConnectService,
+/// signature hands off to an in-app browser tab (WalletConnectService,
 /// which reuses the exact same ckb.js the web app uses) and waits for
 /// the bitshada:// redirect. See wallet_connect.dart's own header
 /// comment for why.

@@ -6,11 +6,16 @@ import 'package:url_launcher/url_launcher.dart';
 /// The mobile half of the project plan's documented wallet-connect
 /// pattern: no native Dart/CKB wallet SDK exists (JoyID's own "Native
 /// App" docs are still a stub), so this app never touches a private
-/// key itself. Instead it opens Bitshada's own web pages in the SYSTEM
-/// browser (never an embedded WebView -- the real browser the user
-/// already trusts handles the actual signing, via the same ckb.js the
-/// web marketplace uses), then listens for the bitshada:// redirect
-/// those pages push once they're done. See
+/// key itself. Instead it opens Bitshada's own web pages in an IN-APP
+/// BROWSER TAB (LaunchMode.inAppBrowserView -- a real Chrome Custom Tab
+/// on Android / SFSafariViewController on iOS, not a plain embedded
+/// WebView) so the real browser engine the user already trusts handles
+/// the actual signing, via the same ckb.js the web marketplace uses,
+/// while the user visually never leaves this app -- the tab slides up
+/// as an overlay over OffersScreen and closes itself (or gets
+/// dismissed) once the bitshada:// redirect lands, instead of
+/// switching to a separate browser app the way
+/// LaunchMode.externalApplication used to. See
 /// web/lib/web_web/live/mobile_connect_live.ex and mobile_action_live.ex
 /// for the other half of this handshake.
 class Wallet {
@@ -57,7 +62,7 @@ class WalletConnectService {
     });
 
     final uri = Uri.parse('$baseUrl/mobile/connect').replace(queryParameters: {'state': state});
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final launched = await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
     if (!launched) {
       _sub?.cancel();
       throw Exception('Could not open the browser to connect a wallet.');
@@ -88,7 +93,7 @@ class WalletConnectService {
     });
 
     final uri = Uri.parse('$baseUrl/mobile/action').replace(queryParameters: {...params, 'state': state});
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final launched = await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
     if (!launched) {
       _sub?.cancel();
       throw Exception('Could not open the browser to complete this action.');
