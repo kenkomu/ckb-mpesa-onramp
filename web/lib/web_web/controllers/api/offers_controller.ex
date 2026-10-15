@@ -29,7 +29,10 @@ defmodule WebWeb.Api.OffersController do
       registry_type_hash: offer.registry_type_hash,
       offer_guard_type_hash: offer.offer_guard_type_hash,
       status: offer.status,
-      reserved_by_lock_hash: offer.reserved_by_lock_hash
+      reserved_by_lock_hash: offer.reserved_by_lock_hash,
+      reserved_until: offer.reserved_until,
+      seller_lock_hash: offer.seller_lock_hash,
+      deadline: offer.deadline
     }
   end
 end

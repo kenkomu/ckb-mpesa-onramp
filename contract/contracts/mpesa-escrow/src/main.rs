@@ -77,11 +77,22 @@ ckb_std::default_alloc!(16384, 1258306, 64);
 //             the same party who reserved it, not a different buyer racing
 //             in with someone else's valid-looking claim.
 //
-// Deliberately NOT implemented yet: reservation expiry / reopening an
-// abandoned offer, and the seller's own overall deadline reclaim path --
-// both need CKB's `since` timelock mechanism, out of scope for this
-// increment. Right now a reservation, once made, is permanent until
-// claimed; that's an honest, named MVP gap, not a hidden one.
+// Expiry, clear and reclaim (all driven by CKB's `since` field, because a
+// script cannot read the wall clock): an absolute-timestamp `since` on the
+// escrow input proves "now >= that time" at commit, nothing more. So:
+//   - Lock args also carry `seller_lock_hash` and an offer `deadline`.
+//   - Reservation data is 40 bytes: reserved_by(32) || reserved_until(u64 LE).
+//   - RESERVE: reserved_until must equal since + RESERVATION_WINDOW_SECS, and
+//     since must be < deadline. A reserver can't claim a longer window than
+//     the chain's real time allows (a future `since` just delays the tx).
+//   - CLEAR: anyone may reopen an expired reservation (since >= reserved_until),
+//     same cell, empty data. A late CLAIM by the original reserver is still
+//     allowed until someone clears -- paying late is not punished.
+//   - RECLAIM: the seller (their lock hash is an input) takes the CKB back
+//     once since >= deadline (and >= reserved_until if reserved).
+//   - RESERVE and CLEAR must not shrink the cell's capacity or change its
+//     type script -- otherwise anyone could "reserve" an offer and pocket
+//     the escrowed CKB in the same transaction.
 //
 // Check 5 (seller-ownership, enforced at MINT, cross-checked here at
 // CLAIM): a Lock Script only ever executes when its cell is being SPENT --
@@ -106,17 +117,21 @@ use alloc::vec::Vec;
 use ckb_std::ckb_constants::Source;
 use ckb_std::ckb_types::prelude::*;
 use ckb_std::high_level::{
-    QueryIter, load_cell_data, load_cell_lock_hash, load_cell_type_hash, load_script,
-    load_witness_args,
+    QueryIter, load_cell_capacity, load_cell_data, load_cell_lock_hash, load_cell_type_hash,
+    load_input_since, load_script, load_witness_args,
 };
 use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
 use sha3::{Digest, Keccak256};
 
-const ARGS_LEN: usize = 124;
+const ARGS_LEN: usize = 164;
 const WITNESS_LEN: usize = 137;
 const CLAIM_MSG_LEN: usize = 72; // tx_id_hash(32) + recipient_hash(32) + amount(8)
 const HASH_LEN: usize = 32;
-const RESERVATION_LEN: usize = 32; // reserved_by_lock_hash
+const RESERVATION_LEN: usize = 40; // reserved_by_lock_hash(32) + reserved_until(u64 LE)
+const RESERVATION_WINDOW_SECS: u64 = 20 * 60;
+// since: bit 63 = relative flag, bits 62..61 = metric. Absolute timestamp = 0b010.
+const SINCE_ABSOLUTE_TIMESTAMP: u64 = 0b010;
+const SINCE_VALUE_MASK: u64 = 0x00ff_ffff_ffff_ffff;
 
 const ERROR_ARGS_LEN: i8 = 4;
 const ERROR_WITNESS_MISSING: i8 = 5;
@@ -132,6 +147,12 @@ const ERROR_CELL_DATA_MISSING: i8 = 14;
 const ERROR_UNSUPPORTED_STRUCTURE: i8 = 15;
 const ERROR_NOT_RESERVED_BY_CLAIMANT: i8 = 16;
 const ERROR_OFFER_GUARD_MISSING: i8 = 17;
+const ERROR_SINCE_INVALID: i8 = 18;
+const ERROR_OFFER_EXPIRED: i8 = 19;
+const ERROR_BAD_RESERVATION_WINDOW: i8 = 20;
+const ERROR_CELL_NOT_PRESERVED: i8 = 21;
+const ERROR_TOO_EARLY: i8 = 22;
+const ERROR_SELLER_NOT_PRESENT: i8 = 23;
 
 pub fn program_entry() -> i8 {
     let script = match load_script() {
@@ -147,40 +168,35 @@ pub fn program_entry() -> i8 {
     let expected_amount = i64::from_le_bytes(args[52..60].try_into().unwrap());
     let expected_registry_type_hash = &args[60..92];
     let expected_offer_guard_type_hash: [u8; 32] = args[92..124].try_into().unwrap();
+    let seller_lock_hash: [u8; 32] = args[124..156].try_into().unwrap();
+    let deadline = u64::from_le_bytes(args[156..164].try_into().unwrap());
 
     let input_data = match load_cell_data(0, Source::GroupInput) {
         Ok(data) => data,
         Err(_) => return ERROR_CELL_DATA_MISSING,
     };
 
-    // RESERVE: open offer -> reserved. No claim witness involved at all.
-    //
-    // Lock scripts never get a "GroupOutput" in the way Type scripts do --
-    // CKB only populates output_indices for Type-script groups (an output
-    // cell has no independent notion of "being unlocked" the way an input
-    // does), so a Lock script has no built-in correspondence to any output.
-    // The RESERVE transition therefore finds its own continuation cell
-    // explicitly: the (only) Output whose lock hash matches this script's
-    // own hash.
-    if input_data.is_empty() {
-        let own_script_hash: [u8; 32] = script.calc_script_hash().unpack();
-        let output_index =
-            QueryIter::new(load_cell_lock_hash, Source::Output).position(|hash| hash == own_script_hash);
-        let output_data = match output_index {
-            Some(index) => load_cell_data(index, Source::Output).ok(),
-            None => None,
-        };
-        return match output_data {
-            Some(data) if data.len() == RESERVATION_LEN => 0,
-            _ => ERROR_UNSUPPORTED_STRUCTURE,
-        };
+    let own_script_hash: [u8; 32] = script.calc_script_hash().unpack();
+    // Lock scripts never get a "GroupOutput" the way Type scripts do, so a
+    // continuation cell is found explicitly: the Output whose lock hash is
+    // this script's own hash.
+    let continuation = QueryIter::new(load_cell_lock_hash, Source::Output)
+        .position(|hash| hash == own_script_hash);
+    let has_claim_witness = claim_witness_present();
+
+    match (input_data.len(), has_claim_witness, continuation) {
+        (0, _, Some(out)) => return reserve(out, deadline),
+        (RESERVATION_LEN, false, Some(out)) => return clear(out, &input_data),
+        (0, _, None) => return reclaim(None, deadline, &seller_lock_hash),
+        (RESERVATION_LEN, false, None) => {
+            return reclaim(Some(&input_data), deadline, &seller_lock_hash)
+        }
+        (RESERVATION_LEN, true, _) => {}
+        _ => return ERROR_UNSUPPORTED_STRUCTURE,
     }
 
-    // Anything else must be a CLAIM: an active reservation being spent.
-    if input_data.len() != RESERVATION_LEN {
-        return ERROR_UNSUPPORTED_STRUCTURE;
-    }
-    let reserved_by_lock_hash = &input_data[..];
+    // Anything left is a CLAIM: an active reservation being spent.
+    let reserved_by_lock_hash = &input_data[..32];
 
     // Check 5 (cross-check): the escrow cell actually being spent must
     // carry the trusted OfferGuard Type Script -- see the module doc
@@ -251,6 +267,97 @@ pub fn program_entry() -> i8 {
         Some(_) => ERROR_REGISTRY_NOT_REGISTERING_THIS_CLAIM,
         None => ERROR_REGISTRY_NOT_FOUND,
     }
+}
+
+/// Absolute-timestamp `since` (seconds) of the escrow input, if it has one.
+fn absolute_since_secs() -> Option<u64> {
+    let since = load_input_since(0, Source::GroupInput).ok()?;
+    if since >> 61 != SINCE_ABSOLUTE_TIMESTAMP {
+        return None;
+    }
+    Some(since & SINCE_VALUE_MASK)
+}
+
+fn claim_witness_present() -> bool {
+    match load_witness_args(0, Source::GroupInput) {
+        Ok(args) => match args.lock().to_opt() {
+            Some(field) => Unpack::<Vec<u8>>::unpack(&field).len() == WITNESS_LEN,
+            None => false,
+        },
+        Err(_) => false,
+    }
+}
+
+/// The continuation output must keep (at least) the escrowed capacity and
+/// the same type script, or the transition could siphon off the funds.
+fn cell_preserved(out: usize) -> bool {
+    let cap_in = load_cell_capacity(0, Source::GroupInput);
+    let cap_out = load_cell_capacity(out, Source::Output);
+    let type_in = load_cell_type_hash(0, Source::GroupInput);
+    let type_out = load_cell_type_hash(out, Source::Output);
+    matches!((cap_in, cap_out), (Ok(i), Ok(o)) if o >= i) && type_in.ok() == type_out.ok()
+}
+
+fn reserve(out: usize, deadline: u64) -> i8 {
+    let since = match absolute_since_secs() {
+        Some(since) => since,
+        None => return ERROR_SINCE_INVALID,
+    };
+    if since >= deadline {
+        return ERROR_OFFER_EXPIRED;
+    }
+    let data = match load_cell_data(out, Source::Output) {
+        Ok(data) if data.len() == RESERVATION_LEN => data,
+        _ => return ERROR_UNSUPPORTED_STRUCTURE,
+    };
+    let until = u64::from_le_bytes(data[32..40].try_into().unwrap());
+    if until != since.saturating_add(RESERVATION_WINDOW_SECS) {
+        return ERROR_BAD_RESERVATION_WINDOW;
+    }
+    if !cell_preserved(out) {
+        return ERROR_CELL_NOT_PRESERVED;
+    }
+    0
+}
+
+fn clear(out: usize, input_data: &[u8]) -> i8 {
+    let since = match absolute_since_secs() {
+        Some(since) => since,
+        None => return ERROR_SINCE_INVALID,
+    };
+    let until = u64::from_le_bytes(input_data[32..40].try_into().unwrap());
+    if since < until {
+        return ERROR_TOO_EARLY;
+    }
+    match load_cell_data(out, Source::Output) {
+        Ok(data) if data.is_empty() => {}
+        _ => return ERROR_UNSUPPORTED_STRUCTURE,
+    }
+    if !cell_preserved(out) {
+        return ERROR_CELL_NOT_PRESERVED;
+    }
+    0
+}
+
+fn reclaim(reservation: Option<&[u8]>, deadline: u64, seller_lock_hash: &[u8; 32]) -> i8 {
+    let since = match absolute_since_secs() {
+        Some(since) => since,
+        None => return ERROR_SINCE_INVALID,
+    };
+    let mut not_before = deadline;
+    if let Some(data) = reservation {
+        let until = u64::from_le_bytes(data[32..40].try_into().unwrap());
+        not_before = not_before.max(until);
+    }
+    if since < not_before {
+        return ERROR_TOO_EARLY;
+    }
+    let seller_present =
+        QueryIter::new(load_cell_lock_hash, Source::Input).any(|hash| &hash == seller_lock_hash);
+    if !seller_present {
+        return ERROR_SELLER_NOT_PRESENT;
+    }
+    0
 }
 
 /// Scans transaction outputs for a cell whose type script hash matches

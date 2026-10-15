@@ -20,13 +20,23 @@ defmodule WebWeb.OffersLive do
 
   alias Web.Ckb.{OfferDirectory, Offers, Phone}
 
+  @tick_ms 30_000
+
   def mount(_params, _session, socket) do
+    if connected?(socket), do: Process.send_after(self(), :tick, @tick_ms)
+
     {:ok,
      socket
+     |> assign(now: System.os_time(:second))
      |> assign(tab: :buy, wallet: nil, wallet_error: nil, busy: nil, notice: nil, tx_error: nil)
      |> assign(faucet_busy: false, faucet_notice: nil, faucet_error: nil)
      |> assign(create_form: to_form(%{"identifier" => "", "amount" => ""}))
      |> load_offers()}
+  end
+
+  def handle_info(:tick, socket) do
+    Process.send_after(self(), :tick, @tick_ms)
+    {:noreply, assign(socket, now: System.os_time(:second))}
   end
 
   def handle_event("set_tab", %{"tab" => tab}, socket) when tab in ["buy", "sell"] do
@@ -100,6 +110,12 @@ defmodule WebWeb.OffersLive do
     end
   end
 
+  def handle_event("clear_reservation", %{"tx_hash" => tx_hash, "index" => index}, socket),
+    do: offer_action(socket, tx_hash, index, :clear, "run_clear_reservation")
+
+  def handle_event("reclaim_offer", %{"tx_hash" => tx_hash, "index" => index}, socket),
+    do: offer_action(socket, tx_hash, index, :reclaim, "run_reclaim_offer")
+
   def handle_event("claim_offer", %{"tx_hash" => tx_hash, "index" => index}, socket) do
     case Offers.find(tx_hash, index) do
       nil ->
@@ -119,7 +135,7 @@ defmodule WebWeb.OffersLive do
     {:noreply,
      socket
      |> assign(busy: nil, notice: "#{action_label(action)} submitted: #{tx_hash}", tx_error: nil)
-     |> assign(tab: if(action == "create", do: :sell, else: :buy))
+     |> assign(tab: if(action in ["create", "reclaim"], do: :sell, else: :buy))
      |> load_offers()}
   end
 
@@ -153,7 +169,22 @@ defmodule WebWeb.OffersLive do
   defp action_label("create"), do: "Create"
   defp action_label("reserve"), do: "Reserve"
   defp action_label("claim"), do: "Claim"
+  defp action_label("clear"), do: "Reopen"
+  defp action_label("reclaim"), do: "Take back"
   defp action_label(other), do: other
+
+  defp offer_action(socket, tx_hash, index, busy, event) do
+    case Offers.find(tx_hash, index) do
+      nil ->
+        {:noreply, assign(socket, tx_error: "That offer isn't listed anymore -- try refreshing.")}
+
+      offer ->
+        {:noreply,
+         socket
+         |> assign(busy: busy, notice: nil, tx_error: nil)
+         |> push_event(event, %{offer: Offers.to_json(offer)})}
+    end
+  end
 
   defp load_offers(socket) do
     case Offers.list() do
@@ -171,18 +202,19 @@ defmodule WebWeb.OffersLive do
   defp mine_reserved(offers, wallet),
     do: Enum.filter(offers, &(&1.status == :reserved and &1.reserved_by_lock_hash == wallet.lock_hash))
 
-  defp my_sales(_offers, _directory, nil), do: []
+  defp my_sales(_offers, nil), do: []
+  defp my_sales(offers, wallet), do: Enum.filter(offers, &(&1.seller_lock_hash == wallet.lock_hash))
 
-  defp my_sales(offers, directory, wallet) do
-    Enum.filter(offers, fn o ->
-      match?(%{seller_lock_hash: lh} when lh == wallet.lock_hash, directory[o.recipient_hash])
-    end)
-  end
+  defp expired?(offer, now), do: offer.status == :reserved and offer.reserved_until <= now
 
-  defp buy_list(offers, directory, wallet) do
-    mine = my_sales(offers, directory, wallet) ++ mine_reserved(offers, wallet)
+  defp buy_list(offers, wallet) do
+    mine = my_sales(offers, wallet) ++ mine_reserved(offers, wallet)
     Enum.reject(offers, &(&1 in mine))
   end
+
+  defp minutes_left(until, now), do: max(div(until - now + 59, 60), 0)
+
+  defp format_time(unix), do: unix |> DateTime.from_unix!() |> Calendar.strftime("%d %b %H:%M UTC")
 
   defp seller_number(directory, offer) do
     case directory[offer.recipient_hash] do
@@ -310,6 +342,12 @@ defmodule WebWeb.OffersLive do
             <div :if={!seller_number(@directory, offer)} class="text-sm text-warning">
               The seller's number isn't available for this older offer. Please reserve a newer one.
             </div>
+            <p :if={!expired?(offer, @now)} class="text-xs text-warning font-semibold">
+              Reserved for you for {minutes_left(offer.reserved_until, @now)} more min &mdash; send the money before then.
+            </p>
+            <p :if={expired?(offer, @now)} class="text-xs text-warning font-semibold">
+              Your 20 minutes are up. If you've already paid, you can still claim until someone reopens the offer.
+            </p>
             <p class="text-xs text-base-content/60">
               Only tap Claim after you've sent the money. You'll receive {format_capacity(offer.capacity_shannon)}.
             </p>
@@ -327,9 +365,10 @@ defmodule WebWeb.OffersLive do
           </div>
         </div>
 
-        <% listed = Enum.filter(buy_list(@offers, @directory, @wallet), &(&1.status == :open))
-        taken = Enum.filter(buy_list(@offers, @directory, @wallet), &(&1.status == :reserved)) %>
-        <div :if={@error == nil and listed == [] and mine_reserved(@offers, @wallet) == []} class="flex flex-col items-center gap-2 text-center py-12">
+        <% listed = Enum.filter(buy_list(@offers, @wallet), &(&1.status == :open))
+        taken = Enum.filter(buy_list(@offers, @wallet), &(&1.status == :reserved and not expired?(&1, @now)))
+        expired = Enum.filter(buy_list(@offers, @wallet), &expired?(&1, @now)) %>
+        <div :if={@error == nil and listed == [] and expired == [] and mine_reserved(@offers, @wallet) == []} class="flex flex-col items-center gap-2 text-center py-12">
           <.icon name="hero-inbox" class="size-8 text-base-content/30" />
           <p class="text-base-content/60">No offers available right now. Check back soon, or sell some CKB yourself.</p>
         </div>
@@ -362,8 +401,31 @@ defmodule WebWeb.OffersLive do
           </div>
         </div>
 
+        <div :if={expired != []} class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div :for={offer <- expired} class="card bg-base-200 border border-dashed border-warning/50 shadow-sm">
+            <div class="card-body gap-2">
+              <span class="text-xs font-semibold text-warning">Reservation expired</span>
+              <div class="font-mono text-2xl font-bold tabular-nums">
+                {format_amount(offer.amount)} <span class="text-sm font-normal text-base-content/60">KES</span>
+              </div>
+              <p class="text-xs text-base-content/60">The buyer never completed this. Reopen it so anyone can buy.</p>
+              <.button
+                :if={@wallet}
+                phx-click="clear_reservation"
+                phx-value-tx_hash={offer.out_point["tx_hash"]}
+                phx-value-index={offer.out_point["index"]}
+                disabled={@busy == :clear}
+                phx-disable-with="Reopening..."
+                class="btn-sm btn-outline w-full"
+              >
+                {if @busy == :clear, do: "Reopening...", else: "Reopen offer"}
+              </.button>
+            </div>
+          </div>
+        </div>
+
         <details :if={taken != []} class="text-sm">
-          <summary class="cursor-pointer text-base-content/60">{length(taken)} offers already reserved by other buyers</summary>
+          <summary class="cursor-pointer text-base-content/60">{length(taken)} offer(s) currently reserved by other buyers</summary>
           <ul class="mt-2 space-y-1 text-base-content/60 font-mono">
             <li :for={offer <- taken}>{format_amount(offer.amount)} KES &middot; {format_capacity(offer.capacity_shannon)}</li>
           </ul>
@@ -402,7 +464,7 @@ defmodule WebWeb.OffersLive do
           </div>
         </div>
 
-        <% sales = my_sales(@offers, @directory, @wallet) %>
+        <% sales = my_sales(@offers, @wallet) %>
         <div>
           <h3 class="font-display font-semibold mb-3">My offers</h3>
           <p :if={sales == []} class="text-sm text-base-content/60">You haven't listed anything yet.</p>
@@ -415,10 +477,23 @@ defmodule WebWeb.OffersLive do
                 </div>
                 <div class="text-sm text-base-content/70 font-mono">{format_capacity(offer.capacity_shannon)} in escrow</div>
                 <div class="text-xs text-base-content/60">
-                  {if offer.status == :open,
-                    do: "Waiting for a buyer.",
-                    else: "A buyer reserved this. Expect #{format_amount(offer.amount)} KES on your M-Pesa."}
+                  <%= cond do %>
+                    <% offer.status == :open -> %>Waiting for a buyer. Live until {format_time(offer.deadline)}.
+                    <% expired?(offer, @now) -> %>The buyer's reservation expired without a claim.
+                    <% true -> %>A buyer reserved this. Expect {format_amount(offer.amount)} KES on your M-Pesa.
+                  <% end %>
                 </div>
+                <.button
+                  :if={offer.deadline <= @now and (offer.status == :open or expired?(offer, @now))}
+                  phx-click="reclaim_offer"
+                  phx-value-tx_hash={offer.out_point["tx_hash"]}
+                  phx-value-index={offer.out_point["index"]}
+                  disabled={@busy == :reclaim}
+                  phx-disable-with="Taking back..."
+                  class="btn-sm btn-outline w-full mt-1"
+                >
+                  {if @busy == :reclaim, do: "Taking back...", else: "Take back my CKB"}
+                </.button>
               </div>
             </div>
           </div>

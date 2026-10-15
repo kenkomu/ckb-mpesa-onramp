@@ -170,7 +170,7 @@ function outPointFrom(apiOutPoint) {
   return { txHash: apiOutPoint.tx_hash ?? apiOutPoint.txHash, index: apiOutPoint.index };
 }
 
-/** Rebuilds mpesa-escrow's own 124-byte lock args from an offer's decoded API fields. */
+/** Rebuilds mpesa-escrow's own 164-byte lock args from an offer's decoded API fields. */
 function escrowArgsFromOffer(offer) {
   return concatHex(
     offer.witness_address,
@@ -178,7 +178,31 @@ function escrowArgsFromOffer(offer) {
     amountToLeHex8(offer.amount),
     offer.registry_type_hash,
     offer.offer_guard_type_hash,
+    offer.seller_lock_hash,
+    amountToLeHex8(offer.deadline),
   );
+}
+
+// ---- time: the contract can't read a clock, only a `since` lower bound ----
+
+const RESERVATION_WINDOW_SECS = 20 * 60; // must match mpesa-escrow
+const OFFER_LIFETIME_SECS = 24 * 60 * 60; // how long a seller's offer stays live
+const SINCE_ABSOLUTE_TIMESTAMP = 0b010n << 61n;
+
+/** The chain's own median time (seconds): the largest `since` a tx can use right now. */
+export async function chainNowSecs(config) {
+  const cfg = config ?? (await getConfig());
+  const res = await fetch(cfg.rpc_url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "get_blockchain_info", params: [] }),
+  });
+  const { result } = await res.json();
+  return Number(BigInt(result.median_time) / 1000n);
+}
+
+function sinceAt(secs) {
+  return SINCE_ABSOLUTE_TIMESTAMP | BigInt(secs);
 }
 
 /** Rebuilds offer-guard's own 52-byte type args from an offer's decoded API fields. */
@@ -333,6 +357,8 @@ export async function createOffer(recipientHashHex, amountMinorUnits) {
     amountToLeHex8(amountMinorUnits),
     config.claims_registry.type_hash,
     guardScript.hash(),
+    sellerLock.hash(),
+    amountToLeHex8((await chainNowSecs(config)) + OFFER_LIFETIME_SECS),
   );
   const escrowLock = scriptFrom(config.mpesa_escrow.code_hash, config.mpesa_escrow.hash_type, escrowArgs);
 
@@ -380,34 +406,82 @@ export async function createOffer(recipientHashHex, amountMinorUnits) {
 }
 
 /**
- * Reserves an open offer for the connected wallet. Deliberately
- * unauthorized -- mpesa-escrow's own RESERVE branch reads no witness at
- * all -- so this needs no signature, only the wallet's own lock hash.
+ * Reserves an open offer for the connected wallet for 20 minutes.
+ * Unauthorized by design (any wallet may reserve), but the reservation's
+ * expiry is pinned to the transaction's own `since`, and the escrow cell
+ * must keep its full capacity -- so the reserver pays the network fee
+ * from their own funds, not from the escrow.
  */
 export async function reserveOffer(offer) {
-  const { config } = await getSigner();
+  const { signer, config } = await getSigner();
   const walletHash = (await walletInfo()).lockHash;
+  const nowSecs = await chainNowSecs(config);
 
   const escrowLock = scriptFrom(config.mpesa_escrow.code_hash, config.mpesa_escrow.hash_type, escrowArgsFromOffer(offer));
   const guardScript = scriptFrom(config.offer_guard.code_hash, config.offer_guard.hash_type, guardArgsFromOffer(offer));
 
-  // RESERVE needs its own small fee (borrowed from the escrow cell's own
-  // headroom, added at create_offer time) -- capacity-in must exceed
-  // capacity-out by at least the pool's min fee rate, even for a
-  // transaction that otherwise moves no value (same reasoning as
-  // devnet-ops/src/claim_offer.rs's own reserve_fee).
-  const reserveFee = 1_000_000n; // 0.01 CKB, comfortably over the pool minimum
-  const reservedCapacity = BigInt(offer.capacity_shannon) - reserveFee;
-
   const tx = ccc.Transaction.from({
-    inputs: [{ previousOutput: outPointFrom(offer.out_point) }],
-    outputs: [{ capacity: reservedCapacity, lock: escrowLock, type: guardScript }],
-    outputsData: [walletHash],
+    inputs: [{ previousOutput: outPointFrom(offer.out_point), since: sinceAt(nowSecs) }],
+    outputs: [{ capacity: offer.capacity_shannon, lock: escrowLock, type: guardScript }],
+    outputsData: [concatHex(walletHash, amountToLeHex8(nowSecs + RESERVATION_WINDOW_SECS))],
     witnesses: ["0x"],
   });
-  tx.addCellDeps(contractCellDep(config.mpesa_escrow), contractCellDep(config.offer_guard));
+  tx.addCellDeps(sighashCellDep(config), contractCellDep(config.mpesa_escrow), contractCellDep(config.offer_guard));
 
-  return submit(tx, config);
+  await tx.completeFeeBy(signer, FEE_RATE);
+  const signed = await signer.signOnlyTransaction(tx);
+  return submit(signed, config);
+}
+
+/**
+ * Reopens an offer whose reservation has expired. Anyone may do this
+ * (the buyer who ghosted, the seller, or a bystander) -- the contract
+ * only requires that the chain's time has passed `reserved_until`.
+ */
+export async function clearReservation(offer) {
+  const { signer, config } = await getSigner();
+  const nowSecs = await chainNowSecs(config);
+  if (nowSecs < offer.reserved_until) throw new Error("This reservation hasn't expired yet.");
+
+  const escrowLock = scriptFrom(config.mpesa_escrow.code_hash, config.mpesa_escrow.hash_type, escrowArgsFromOffer(offer));
+  const guardScript = scriptFrom(config.offer_guard.code_hash, config.offer_guard.hash_type, guardArgsFromOffer(offer));
+
+  const tx = ccc.Transaction.from({
+    inputs: [{ previousOutput: outPointFrom(offer.out_point), since: sinceAt(offer.reserved_until) }],
+    outputs: [{ capacity: offer.capacity_shannon, lock: escrowLock, type: guardScript }],
+    outputsData: ["0x"],
+    witnesses: ["0x"],
+  });
+  tx.addCellDeps(sighashCellDep(config), contractCellDep(config.mpesa_escrow), contractCellDep(config.offer_guard));
+
+  await tx.completeFeeBy(signer, FEE_RATE);
+  const signed = await signer.signOnlyTransaction(tx);
+  return submit(signed, config);
+}
+
+/**
+ * Seller takes their CKB back once the offer's deadline has passed (and
+ * any reservation has expired). The seller's own wallet input is what
+ * the contract checks against `seller_lock_hash`.
+ */
+export async function reclaimOffer(offer) {
+  const { signer, config } = await getSigner();
+  const addressObj = await signer.getAddressObjSecp256k1();
+  const sellerLock = addressObj.script;
+  const notBefore = Math.max(offer.deadline, offer.reserved_until ?? 0);
+  if ((await chainNowSecs(config)) < notBefore) throw new Error("This offer hasn't reached its deadline yet.");
+
+  const tx = ccc.Transaction.from({
+    inputs: [{ previousOutput: outPointFrom(offer.out_point), since: sinceAt(notBefore) }],
+    outputs: [{ capacity: offer.capacity_shannon, lock: sellerLock }],
+    outputsData: ["0x"],
+    witnesses: ["0x"],
+  });
+  tx.addCellDeps(sighashCellDep(config), contractCellDep(config.mpesa_escrow));
+
+  await tx.completeFeeChangeToOutput(signer, 0, FEE_RATE);
+  const signed = await signer.signOnlyTransaction(tx);
+  return submit(signed, config);
 }
 
 /**

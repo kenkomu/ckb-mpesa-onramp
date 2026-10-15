@@ -3,7 +3,7 @@
 // signing/submission call lives in ckb.js; this just relays LiveView
 // events to it, translates any error into plain language, and pushes
 // the result back.
-import { createOffer, reserveOffer, claimOffer, walletInfo, hashIdentifier } from "./ckb.js";
+import { createOffer, reserveOffer, claimOffer, clearReservation, reclaimOffer, walletInfo, hashIdentifier } from "./ckb.js";
 import { friendlyError } from "./chain_errors.js";
 
 export const Wallet = {
@@ -19,6 +19,14 @@ export const Wallet = {
 
     this.handleEvent("run_reserve_offer", async ({ offer }) => {
       await this.run("reserve", () => reserveOffer(offer));
+    });
+
+    this.handleEvent("run_clear_reservation", async ({ offer }) => {
+      await this.run("clear", () => clearReservation(offer));
+    });
+
+    this.handleEvent("run_reclaim_offer", async ({ offer }) => {
+      await this.run("reclaim", () => reclaimOffer(offer));
     });
 
     this.handleEvent("run_claim_offer", async ({ offer, tx_id_seed }) => {

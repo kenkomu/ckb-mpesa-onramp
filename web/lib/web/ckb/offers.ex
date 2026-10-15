@@ -6,9 +6,10 @@ defmodule Web.Ckb.Offers do
   Escrow cell shape (see contract/contracts/mpesa-escrow/src/main.rs):
 
     lock.args (124 bytes) = witness_address[20] || recipient_hash[32] ||
-      amount[8 LE] || registry_type_hash[32] || offer_guard_type_hash[32]
+      amount[8 LE] || registry_type_hash[32] || offer_guard_type_hash[32] ||
+      seller_lock_hash[32] || deadline[8 LE, unix seconds]
 
-    data = "" (open) or reserved_by_lock_hash[32] (reserved) -- see check
+    data = "" (open) or reserved_by_lock_hash[32] || reserved_until[8 LE] (reserved) -- see check
     4's own doc comment for why an escrow cell's DATA, not its args,
     carries this: args are fixed forever at mint time, but reservation
     state has to change without touching the offer's own identity.
@@ -47,12 +48,15 @@ defmodule Web.Ckb.Offers do
     :registry_type_hash,
     :offer_guard_type_hash,
     :status,
-    :reserved_by_lock_hash
+    :reserved_by_lock_hash,
+    :reserved_until,
+    :seller_lock_hash,
+    :deadline
   ]
 
-  @args_len 124
+  @args_len 164
   @guard_args_len 52
-  @reservation_len 32
+  @reservation_len 40
   # capacity(8) + lock{code_hash(32)+hash_type(1)+args(@args_len)} +
   # type{code_hash(32)+hash_type(1)+args(@guard_args_len)} + data(0) --
   # the minimum viable capacity for an OPEN escrow cell (no reservation
@@ -112,7 +116,10 @@ defmodule Web.Ckb.Offers do
       registry_type_hash: offer.registry_type_hash,
       offer_guard_type_hash: offer.offer_guard_type_hash,
       status: offer.status,
-      reserved_by_lock_hash: offer.reserved_by_lock_hash
+      reserved_by_lock_hash: offer.reserved_by_lock_hash,
+      reserved_until: offer.reserved_until,
+      seller_lock_hash: offer.seller_lock_hash,
+      deadline: offer.deadline
     }
   end
 
@@ -164,15 +171,22 @@ defmodule Web.Ckb.Offers do
       recipient_hash: binary_part(args, 20, 32) |> tohex(),
       amount: binary_part(args, 52, 8) |> :binary.decode_unsigned(:little),
       registry_type_hash: binary_part(args, 60, 32) |> tohex(),
-      offer_guard_type_hash: binary_part(args, 92, 32) |> tohex()
+      offer_guard_type_hash: binary_part(args, 92, 32) |> tohex(),
+      seller_lock_hash: binary_part(args, 124, 32) |> tohex(),
+      deadline: binary_part(args, 156, 8) |> :binary.decode_unsigned(:little)
     }
     |> put_status(data)
   end
 
   defp put_status(offer, <<>>), do: %{offer | status: :open}
 
-  defp put_status(offer, <<reserved_by::binary-size(@reservation_len)>>) do
-    %{offer | status: :reserved, reserved_by_lock_hash: tohex(reserved_by)}
+  defp put_status(offer, <<reserved_by::binary-size(32), until::binary-size(8)>>) do
+    %{
+      offer
+      | status: :reserved,
+        reserved_by_lock_hash: tohex(reserved_by),
+        reserved_until: :binary.decode_unsigned(until, :little)
+    }
   end
 
   defp put_status(offer, _other), do: %{offer | status: :unknown}

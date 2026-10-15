@@ -81,13 +81,28 @@ fn build_args(
     registry_type_hash: &[u8; 32],
     offer_guard_type_hash: &[u8; 32],
 ) -> Bytes {
-    let mut args = Vec::with_capacity(124);
+    let mut args = Vec::with_capacity(164);
     args.extend_from_slice(witness_address);
     args.extend_from_slice(recipient_hash);
     args.extend_from_slice(&amount.to_le_bytes());
     args.extend_from_slice(registry_type_hash);
     args.extend_from_slice(offer_guard_type_hash);
+    // seller_lock_hash + deadline: unused by the claim-path tests.
+    args.extend_from_slice(&[0u8; 32]);
+    args.extend_from_slice(&u64::MAX.to_le_bytes());
     Bytes::from(args)
+}
+
+const ABS_TS: u64 = 0b010 << 61;
+fn ts_since(secs: u64) -> u64 {
+    ABS_TS | secs
+}
+
+/// 40-byte reservation data: reserved_by(32) || reserved_until(u64 LE).
+fn reservation_data(reserved_by: &[u8; 32], until: u64) -> Bytes {
+    let mut data = reserved_by.to_vec();
+    data.extend_from_slice(&until.to_le_bytes());
+    Bytes::from(data)
 }
 
 /// Builds the exact 33-byte message the contract (both mpesa-escrow and
@@ -264,7 +279,7 @@ fn build_escrow_claim_tx_with_reservation(
             .lock(lock_script.clone())
             .type_(Some(guard_type_script.clone()).pack())
             .build(),
-        Bytes::from(reserved_by_lock_hash.to_vec()),
+        reservation_data(&reserved_by_lock_hash, 0),
     );
     let escrow_input = CellInput::new_builder()
         .previous_output(escrow_input_out_point)
@@ -506,7 +521,9 @@ fn test_malformed_witness_length_rejected() {
         &guard_type_script,
     );
     let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
-    assert_script_error(err, 6); // ERROR_WITNESS_LEN
+    // A wrong-length witness is no longer recognized as a claim attempt at all; with
+    // no continuation output it is treated as a reclaim and fails the since check.
+    assert_script_error(err, 18); // ERROR_SINCE_INVALID
 }
 
 #[test]
@@ -671,6 +688,7 @@ fn build_reserve_tx(context: &mut Context, reserved_by_lock_hash: &[u8; 32]) -> 
     );
     let escrow_input = CellInput::new_builder()
         .previous_output(escrow_input_out_point)
+        .since(ts_since(1_000_000))
         .build();
     let escrow_output = CellOutput::new_builder()
         .capacity(100_000_000_000u64)
@@ -681,7 +699,7 @@ fn build_reserve_tx(context: &mut Context, reserved_by_lock_hash: &[u8; 32]) -> 
     let tx = TransactionBuilder::default()
         .input(escrow_input)
         .output(escrow_output)
-        .outputs_data(vec![Bytes::from(reserved_by_lock_hash.to_vec())].pack())
+        .outputs_data(vec![reservation_data(reserved_by_lock_hash, 1_000_000 + 1200)].pack())
         .cell_deps(cell_deps)
         .build();
     context.complete_tx(tx)
@@ -717,6 +735,7 @@ fn test_reserve_transition_rejects_malformed_output_data() {
     );
     let escrow_input = CellInput::new_builder()
         .previous_output(escrow_input_out_point)
+        .since(ts_since(1_000_000))
         .build();
     let escrow_output = CellOutput::new_builder()
         .capacity(100_000_000_000u64)
@@ -1052,7 +1071,7 @@ fn test_claim_without_offer_guard_attached_rejected() {
             .capacity(100_000_000_000u64)
             .lock(lock_script.clone())
             .build(),
-        Bytes::from(buyer_lock_hash.to_vec()),
+        reservation_data(&buyer_lock_hash, 0),
     );
     let escrow_input = CellInput::new_builder().previous_output(escrow_input_out_point).build();
     let escrow_payout_output = CellOutput::new_builder()
@@ -1156,7 +1175,7 @@ fn test_claim_with_wrong_offer_guard_type_hash_rejected() {
             .lock(lock_script.clone())
             .type_(Some(wrong_guard_type_script).pack())
             .build(),
-        Bytes::from(buyer_lock_hash.to_vec()),
+        reservation_data(&buyer_lock_hash, 0),
     );
     let escrow_input = CellInput::new_builder().previous_output(escrow_input_out_point).build();
     let escrow_payout_output = CellOutput::new_builder()
@@ -1490,4 +1509,179 @@ fn test_always_success() {
         .verify_tx(&tx, 10_000_000)
         .expect("pass verification");
     println!("consume cycles: {}", cycles);
+}
+
+// ============================================================================
+// Expiry, clear, reclaim, and the capacity-preservation guard
+// ============================================================================
+
+const DEADLINE: u64 = 2_000_000;
+
+/// Generic builder for the four non-claim transitions. `input_data` is the
+/// escrow cell's data, `output` = Some((capacity, data, keep_type)) for a
+/// continuation cell (RESERVE/CLEAR) or None for a RECLAIM, and
+/// `extra_input` adds one more input locked by that script (the seller).
+fn build_op_tx(
+    context: &mut Context,
+    seller_lock: &Script,
+    input_data: Bytes,
+    output: Option<(u64, Bytes, bool)>,
+    since: Option<u64>,
+    seller_present: bool,
+) -> TransactionView {
+    let out_point = context.deploy_cell_by_name("mpesa-escrow");
+    let seller_lock_hash: [u8; 32] = seller_lock.calc_script_hash().unpack();
+    let mut args = build_args(&[0u8; 20], &[0u8; 32], 0, &[0u8; 32], &[0u8; 32]).to_vec();
+    args[124..156].copy_from_slice(&seller_lock_hash);
+    args[156..164].copy_from_slice(&DEADLINE.to_le_bytes());
+    let lock_script = context.build_script(&out_point, Bytes::from(args)).expect("script");
+
+    let as_out_point = context.deploy_cell(ckb_testtool::builtin::ALWAYS_SUCCESS.clone());
+    let type_script = context.build_script(&as_out_point, Bytes::from(vec![9])).expect("type");
+
+    let escrow_out_point = context.create_cell(
+        CellOutput::new_builder()
+            .capacity(100_000_000_000u64)
+            .lock(lock_script.clone())
+            .type_(Some(type_script.clone()).pack())
+            .build(),
+        input_data,
+    );
+    let mut input = CellInput::new_builder().previous_output(escrow_out_point);
+    if let Some(since) = since {
+        input = input.since(since);
+    }
+    let mut builder = TransactionBuilder::default().input(input.build());
+    let mut outputs_data: Vec<Bytes> = vec![];
+    if let Some((capacity, data, keep_type)) = output {
+        let mut o = CellOutput::new_builder().capacity(capacity).lock(lock_script.clone());
+        if keep_type {
+            o = o.type_(Some(type_script.clone()).pack());
+        }
+        builder = builder.output(o.build());
+        outputs_data.push(data);
+    }
+    if seller_present {
+        let seller_cell = context.create_cell(
+            CellOutput::new_builder().capacity(50_000_000_000u64).lock(seller_lock.clone()).build(),
+            Bytes::new(),
+        );
+        builder = builder
+            .input(CellInput::new_builder().previous_output(seller_cell).build())
+            .output(CellOutput::new_builder().capacity(50_000_000_000u64).lock(seller_lock.clone()).build());
+        outputs_data.push(Bytes::new());
+    }
+    let tx = builder
+        .outputs_data(outputs_data.pack())
+        .cell_dep(CellDep::new_builder().out_point(out_point).build())
+        .cell_dep(CellDep::new_builder().out_point(as_out_point).build())
+        .build();
+    context.complete_tx(tx)
+}
+
+fn seller(context: &mut Context) -> Script {
+    claimant_lock(context, 77)
+}
+
+const CAP: u64 = 100_000_000_000;
+
+#[test]
+fn test_reserve_without_since_rejected() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, Bytes::new(), Some((CAP, reservation_data(&[1; 32], 1_001_200), true)), None, false);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 18);
+}
+
+#[test]
+fn test_reserve_with_wrong_window_rejected() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    // Claims a 1-day window instead of 20 minutes.
+    let tx = build_op_tx(&mut c, &s, Bytes::new(), Some((CAP, reservation_data(&[1; 32], 1_000_000 + 86_400), true)), Some(ts_since(1_000_000)), false);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 20);
+}
+
+#[test]
+fn test_reserve_after_deadline_rejected() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, Bytes::new(), Some((CAP, reservation_data(&[1; 32], DEADLINE + 1200), true)), Some(ts_since(DEADLINE)), false);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 19);
+}
+
+#[test]
+fn test_reserve_cannot_drain_escrow_capacity() {
+    // The theft case: "reserve" while pocketing most of the CKB.
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, Bytes::new(), Some((CAP / 10, reservation_data(&[1; 32], 1_001_200), true)), Some(ts_since(1_000_000)), false);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 21);
+}
+
+#[test]
+fn test_reserve_cannot_strip_type_script() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, Bytes::new(), Some((CAP, reservation_data(&[1; 32], 1_001_200), false)), Some(ts_since(1_000_000)), false);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 21);
+}
+
+#[test]
+fn test_clear_expired_reservation_by_anyone() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, reservation_data(&[1; 32], 1_001_200), Some((CAP, Bytes::new(), true)), Some(ts_since(1_001_200)), false);
+    c.verify_tx(&tx, MAX_CYCLES).expect("clear after expiry should pass");
+}
+
+#[test]
+fn test_clear_before_expiry_rejected() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, reservation_data(&[1; 32], 1_001_200), Some((CAP, Bytes::new(), true)), Some(ts_since(1_001_199)), false);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 22);
+}
+
+#[test]
+fn test_clear_must_leave_cell_open() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, reservation_data(&[1; 32], 1_001_200), Some((CAP, reservation_data(&[2; 32], 9_999_999), true)), Some(ts_since(1_001_200)), false);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 15);
+}
+
+#[test]
+fn test_seller_reclaims_open_offer_after_deadline() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, Bytes::new(), None, Some(ts_since(DEADLINE)), true);
+    c.verify_tx(&tx, MAX_CYCLES).expect("reclaim should pass");
+}
+
+#[test]
+fn test_reclaim_before_deadline_rejected() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, Bytes::new(), None, Some(ts_since(DEADLINE - 1)), true);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 22);
+}
+
+#[test]
+fn test_reclaim_by_someone_other_than_seller_rejected() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let tx = build_op_tx(&mut c, &s, Bytes::new(), None, Some(ts_since(DEADLINE)), false);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 23);
+}
+
+#[test]
+fn test_reclaim_reserved_offer_waits_for_reservation_to_expire() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let until = DEADLINE + 5_000;
+    let early = build_op_tx(&mut c, &s, reservation_data(&[1; 32], until), None, Some(ts_since(DEADLINE)), true);
+    assert_script_error(c.verify_tx(&early, MAX_CYCLES).unwrap_err(), 22);
+    let late = build_op_tx(&mut c, &s, reservation_data(&[1; 32], until), None, Some(ts_since(until)), true);
+    c.verify_tx(&late, MAX_CYCLES).expect("reclaim after reservation expiry should pass");
 }
