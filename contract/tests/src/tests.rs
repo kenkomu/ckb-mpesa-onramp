@@ -98,6 +98,13 @@ fn ts_since(secs: u64) -> u64 {
     ABS_TS | secs
 }
 
+/// 41-byte confirmed data: the reservation plus the seller's 0x01 flag.
+fn confirmed_data(reserved_by: &[u8; 32]) -> Bytes {
+    let mut data = reservation_data(reserved_by, 0).to_vec();
+    data.push(1);
+    Bytes::from(data)
+}
+
 /// 40-byte reservation data: reserved_by(32) || reserved_until(u64 LE).
 fn reservation_data(reserved_by: &[u8; 32], until: u64) -> Bytes {
     let mut data = reserved_by.to_vec();
@@ -279,7 +286,7 @@ fn build_escrow_claim_tx_with_reservation(
             .lock(lock_script.clone())
             .type_(Some(guard_type_script.clone()).pack())
             .build(),
-        reservation_data(&reserved_by_lock_hash, 0),
+        confirmed_data(&reserved_by_lock_hash),
     );
     let escrow_input = CellInput::new_builder()
         .previous_output(escrow_input_out_point)
@@ -521,9 +528,9 @@ fn test_malformed_witness_length_rejected() {
         &guard_type_script,
     );
     let err = context.verify_tx(&tx, MAX_CYCLES).unwrap_err();
-    // A wrong-length witness is no longer recognized as a claim attempt at all; with
-    // no continuation output it is treated as a reclaim and fails the since check.
-    assert_script_error(err, 18); // ERROR_SINCE_INVALID
+    // A wrong-length witness is no longer recognized as a claim attempt at all, and a
+    // confirmed cell has no other valid spend shape.
+    assert_script_error(err, 15); // ERROR_UNSUPPORTED_STRUCTURE
 }
 
 #[test]
@@ -1071,7 +1078,7 @@ fn test_claim_without_offer_guard_attached_rejected() {
             .capacity(100_000_000_000u64)
             .lock(lock_script.clone())
             .build(),
-        reservation_data(&buyer_lock_hash, 0),
+        confirmed_data(&buyer_lock_hash),
     );
     let escrow_input = CellInput::new_builder().previous_output(escrow_input_out_point).build();
     let escrow_payout_output = CellOutput::new_builder()
@@ -1175,7 +1182,7 @@ fn test_claim_with_wrong_offer_guard_type_hash_rejected() {
             .lock(lock_script.clone())
             .type_(Some(wrong_guard_type_script).pack())
             .build(),
-        reservation_data(&buyer_lock_hash, 0),
+        confirmed_data(&buyer_lock_hash),
     );
     let escrow_input = CellInput::new_builder().previous_output(escrow_input_out_point).build();
     let escrow_payout_output = CellOutput::new_builder()
@@ -1684,4 +1691,49 @@ fn test_reclaim_reserved_offer_waits_for_reservation_to_expire() {
     assert_script_error(c.verify_tx(&early, MAX_CYCLES).unwrap_err(), 22);
     let late = build_op_tx(&mut c, &s, reservation_data(&[1; 32], until), None, Some(ts_since(until)), true);
     c.verify_tx(&late, MAX_CYCLES).expect("reclaim after reservation expiry should pass");
+}
+
+fn confirmed_of(reservation: &Bytes) -> Bytes {
+    let mut data = reservation.to_vec();
+    data.push(1);
+    Bytes::from(data)
+}
+
+#[test]
+fn test_seller_confirms_receipt() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let res = reservation_data(&[1; 32], 1_001_200);
+    let tx = build_op_tx(&mut c, &s, res.clone(), Some((CAP, confirmed_of(&res), true)), None, true);
+    c.verify_tx(&tx, MAX_CYCLES).expect("seller confirm should pass");
+}
+
+#[test]
+fn test_confirm_without_seller_rejected() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let res = reservation_data(&[1; 32], 1_001_200);
+    let tx = build_op_tx(&mut c, &s, res.clone(), Some((CAP, confirmed_of(&res), true)), None, false);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 23);
+}
+
+#[test]
+fn test_confirm_cannot_change_the_buyer() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let res = reservation_data(&[1; 32], 1_001_200);
+    let other = reservation_data(&[2; 32], 1_001_200);
+    let tx = build_op_tx(&mut c, &s, res, Some((CAP, confirmed_of(&other), true)), None, true);
+    assert_script_error(c.verify_tx(&tx, MAX_CYCLES).unwrap_err(), 15);
+}
+
+#[test]
+fn test_confirmed_offer_cannot_be_cleared_or_reclaimed() {
+    let mut c = Context::default();
+    let s = seller(&mut c);
+    let conf = confirmed_of(&reservation_data(&[1; 32], 1_001_200));
+    let clear = build_op_tx(&mut c, &s, conf.clone(), Some((CAP, Bytes::new(), true)), Some(ts_since(9_999_999)), false);
+    assert_script_error(c.verify_tx(&clear, MAX_CYCLES).unwrap_err(), 15);
+    let reclaim = build_op_tx(&mut c, &s, conf, None, Some(ts_since(9_999_999)), true);
+    assert_script_error(c.verify_tx(&reclaim, MAX_CYCLES).unwrap_err(), 15);
 }

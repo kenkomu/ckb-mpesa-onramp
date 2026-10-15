@@ -9,7 +9,8 @@ defmodule Web.Ckb.Offers do
       amount[8 LE] || registry_type_hash[32] || offer_guard_type_hash[32] ||
       seller_lock_hash[32] || deadline[8 LE, unix seconds]
 
-    data = "" (open) or reserved_by_lock_hash[32] || reserved_until[8 LE] (reserved) -- see check
+    data = "" (open) or reserved_by_lock_hash[32] || reserved_until[8 LE] (reserved), + 0x01 once the
+    seller confirms receipt (confirmed) -- see check
     4's own doc comment for why an escrow cell's DATA, not its args,
     carries this: args are fixed forever at mint time, but reservation
     state has to change without touching the offer's own identity.
@@ -187,6 +188,11 @@ defmodule Web.Ckb.Offers do
         reserved_by_lock_hash: tohex(reserved_by),
         reserved_until: :binary.decode_unsigned(until, :little)
     }
+  end
+
+  # Seller has confirmed receipt: reservation data + 0x01. Only now can the buyer claim.
+  defp put_status(offer, <<head::binary-size(40), 1>>) do
+    %{put_status(offer, head) | status: :confirmed}
   end
 
   defp put_status(offer, _other), do: %{offer | status: :unknown}

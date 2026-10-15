@@ -90,6 +90,13 @@ ckb_std::default_alloc!(16384, 1258306, 64);
 //     allowed until someone clears -- paying late is not punished.
 //   - RECLAIM: the seller (their lock hash is an input) takes the CKB back
 //     once since >= deadline (and >= reserved_until if reserved).
+//   - CONFIRM: until real Safaricom payment proofs exist, the seller must
+//     confirm receipt before a claim can succeed. The seller (their lock
+//     hash is an input) turns the 40-byte reservation into a 41-byte
+//     "confirmed" one (same data + 0x01). CLAIM only works on confirmed
+//     cells, so nobody can claim without the seller's say-so. Trade-off,
+//     stated plainly: a seller can withhold confirmation (the same weakness
+//     as Binance P2P) -- real proofs are meant to remove that step.
 //   - RESERVE and CLEAR must not shrink the cell's capacity or change its
 //     type script -- otherwise anyone could "reserve" an offer and pocket
 //     the escrowed CKB in the same transaction.
@@ -128,6 +135,7 @@ const WITNESS_LEN: usize = 137;
 const CLAIM_MSG_LEN: usize = 72; // tx_id_hash(32) + recipient_hash(32) + amount(8)
 const HASH_LEN: usize = 32;
 const RESERVATION_LEN: usize = 40; // reserved_by_lock_hash(32) + reserved_until(u64 LE)
+const CONFIRMED_LEN: usize = 41; // reservation(40) + 0x01
 const RESERVATION_WINDOW_SECS: u64 = 20 * 60;
 // since: bit 63 = relative flag, bits 62..61 = metric. Absolute timestamp = 0b010.
 const SINCE_ABSOLUTE_TIMESTAMP: u64 = 0b010;
@@ -153,6 +161,7 @@ const ERROR_BAD_RESERVATION_WINDOW: i8 = 20;
 const ERROR_CELL_NOT_PRESERVED: i8 = 21;
 const ERROR_TOO_EARLY: i8 = 22;
 const ERROR_SELLER_NOT_PRESENT: i8 = 23;
+const ERROR_NOT_CONFIRMED: i8 = 24;
 
 pub fn program_entry() -> i8 {
     let script = match load_script() {
@@ -186,16 +195,25 @@ pub fn program_entry() -> i8 {
 
     match (input_data.len(), has_claim_witness, continuation) {
         (0, _, Some(out)) => return reserve(out, deadline),
-        (RESERVATION_LEN, false, Some(out)) => return clear(out, &input_data),
+        (RESERVATION_LEN, false, Some(out)) => {
+            return match load_cell_data(out, Source::Output) {
+                Ok(data) if data.is_empty() => clear(out, &input_data),
+                Ok(data) if data.len() == CONFIRMED_LEN => {
+                    confirm(out, &input_data, &data, &seller_lock_hash)
+                }
+                _ => ERROR_UNSUPPORTED_STRUCTURE,
+            }
+        }
         (0, _, None) => return reclaim(None, deadline, &seller_lock_hash),
         (RESERVATION_LEN, false, None) => {
             return reclaim(Some(&input_data), deadline, &seller_lock_hash)
         }
-        (RESERVATION_LEN, true, _) => {}
+        (RESERVATION_LEN, true, _) => return ERROR_NOT_CONFIRMED,
+        (CONFIRMED_LEN, true, _) => {}
         _ => return ERROR_UNSUPPORTED_STRUCTURE,
     }
 
-    // Anything left is a CLAIM: an active reservation being spent.
+    // Anything left is a CLAIM: a seller-confirmed reservation being spent.
     let reserved_by_lock_hash = &input_data[..32];
 
     // Check 5 (cross-check): the escrow cell actually being spent must
@@ -332,6 +350,21 @@ fn clear(out: usize, input_data: &[u8]) -> i8 {
     match load_cell_data(out, Source::Output) {
         Ok(data) if data.is_empty() => {}
         _ => return ERROR_UNSUPPORTED_STRUCTURE,
+    }
+    if !cell_preserved(out) {
+        return ERROR_CELL_NOT_PRESERVED;
+    }
+    0
+}
+
+fn confirm(out: usize, input_data: &[u8], output_data: &[u8], seller_lock_hash: &[u8; 32]) -> i8 {
+    if output_data[..RESERVATION_LEN] != *input_data || output_data[RESERVATION_LEN] != 1 {
+        return ERROR_UNSUPPORTED_STRUCTURE;
+    }
+    let seller_present =
+        QueryIter::new(load_cell_lock_hash, Source::Input).any(|hash| &hash == seller_lock_hash);
+    if !seller_present {
+        return ERROR_SELLER_NOT_PRESENT;
     }
     if !cell_preserved(out) {
         return ERROR_CELL_NOT_PRESERVED;

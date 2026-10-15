@@ -113,6 +113,9 @@ defmodule WebWeb.OffersLive do
   def handle_event("clear_reservation", %{"tx_hash" => tx_hash, "index" => index}, socket),
     do: offer_action(socket, tx_hash, index, :clear, "run_clear_reservation")
 
+  def handle_event("confirm_receipt", %{"tx_hash" => tx_hash, "index" => index}, socket),
+    do: offer_action(socket, tx_hash, index, :confirm, "run_confirm_receipt")
+
   def handle_event("reclaim_offer", %{"tx_hash" => tx_hash, "index" => index}, socket),
     do: offer_action(socket, tx_hash, index, :reclaim, "run_reclaim_offer")
 
@@ -135,7 +138,7 @@ defmodule WebWeb.OffersLive do
     {:noreply,
      socket
      |> assign(busy: nil, notice: "#{action_label(action)} submitted: #{tx_hash}", tx_error: nil)
-     |> assign(tab: if(action in ["create", "reclaim"], do: :sell, else: :buy))
+     |> assign(tab: if(action in ["create", "reclaim", "confirm"], do: :sell, else: :buy))
      |> load_offers()}
   end
 
@@ -170,6 +173,7 @@ defmodule WebWeb.OffersLive do
   defp action_label("reserve"), do: "Reserve"
   defp action_label("claim"), do: "Claim"
   defp action_label("clear"), do: "Reopen"
+  defp action_label("confirm"), do: "Confirm"
   defp action_label("reclaim"), do: "Take back"
   defp action_label(other), do: other
 
@@ -200,7 +204,7 @@ defmodule WebWeb.OffersLive do
   defp mine_reserved(offers, nil), do: Enum.reject(offers, fn _ -> true end)
 
   defp mine_reserved(offers, wallet),
-    do: Enum.filter(offers, &(&1.status == :reserved and &1.reserved_by_lock_hash == wallet.lock_hash))
+    do: Enum.filter(offers, &(&1.status in [:reserved, :confirmed] and &1.reserved_by_lock_hash == wallet.lock_hash))
 
   defp my_sales(_offers, nil), do: []
   defp my_sales(offers, wallet), do: Enum.filter(offers, &(&1.seller_lock_hash == wallet.lock_hash))
@@ -349,9 +353,16 @@ defmodule WebWeb.OffersLive do
               Your 20 minutes are up. If you've already paid, you can still claim until someone reopens the offer.
             </p>
             <p class="text-xs text-base-content/60">
-              Only tap Claim after you've sent the money. You'll receive {format_capacity(offer.capacity_shannon)}.
+              Only send the money once. You'll receive {format_capacity(offer.capacity_shannon)}.
             </p>
+            <div :if={offer.status == :reserved} class="alert bg-info/10 border border-info/30 text-sm">
+              After you pay, the seller confirms they got it. Then your Claim button appears here. Keep this page open or come back to it.
+            </div>
+            <div :if={offer.status == :confirmed} class="alert alert-success text-sm">
+              The seller confirmed your payment. Your CKB is ready.
+            </div>
             <.button
+              :if={offer.status == :confirmed}
               phx-click="claim_offer"
               phx-value-tx_hash={offer.out_point["tx_hash"]}
               phx-value-index={offer.out_point["index"]}
@@ -360,13 +371,13 @@ defmodule WebWeb.OffersLive do
               class="btn-primary w-full"
             >
               <span :if={@busy == :claim} class="loading loading-spinner loading-xs"></span>
-              {if @busy == :claim, do: "Claiming...", else: "I've paid -- Claim my CKB"}
+              {if @busy == :claim, do: "Claiming...", else: "Claim my CKB"}
             </.button>
           </div>
         </div>
 
         <% listed = Enum.filter(buy_list(@offers, @wallet), &(&1.status == :open))
-        taken = Enum.filter(buy_list(@offers, @wallet), &(&1.status == :reserved and not expired?(&1, @now)))
+        taken = Enum.filter(buy_list(@offers, @wallet), &(&1.status in [:reserved, :confirmed] and not expired?(&1, @now)))
         expired = Enum.filter(buy_list(@offers, @wallet), &expired?(&1, @now)) %>
         <div :if={@error == nil and listed == [] and expired == [] and mine_reserved(@offers, @wallet) == []} class="flex flex-col items-center gap-2 text-center py-12">
           <.icon name="hero-inbox" class="size-8 text-base-content/30" />
@@ -480,9 +491,21 @@ defmodule WebWeb.OffersLive do
                   <%= cond do %>
                     <% offer.status == :open -> %>Waiting for a buyer. Live until {format_time(offer.deadline)}.
                     <% expired?(offer, @now) -> %>The buyer's reservation expired without a claim.
+                    <% offer.status == :confirmed -> %>You confirmed. The buyer can now claim the CKB.
                     <% true -> %>A buyer reserved this. Expect {format_amount(offer.amount)} KES on your M-Pesa.
                   <% end %>
                 </div>
+                <.button
+                  :if={offer.status == :reserved}
+                  phx-click="confirm_receipt"
+                  phx-value-tx_hash={offer.out_point["tx_hash"]}
+                  phx-value-index={offer.out_point["index"]}
+                  disabled={@busy == :confirm}
+                  phx-disable-with="Confirming..."
+                  class="btn-primary btn-sm w-full mt-1"
+                >
+                  {if @busy == :confirm, do: "Confirming...", else: "I received the KES"}
+                </.button>
                 <.button
                   :if={offer.deadline <= @now and (offer.status == :open or expired?(offer, @now))}
                   phx-click="reclaim_offer"
@@ -517,9 +540,9 @@ defmodule WebWeb.OffersLive do
     <span class={[
       "inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold",
       @status == :open && "bg-success/15 text-success",
-      @status == :reserved && "bg-warning/15 text-warning"
+      @status in [:reserved, :confirmed] && "bg-warning/15 text-warning"
     ]}>
-      <span class={["size-1.5 rounded-full", @status == :open && "bg-success", @status == :reserved && "bg-warning"]}></span>
+      <span class={["size-1.5 rounded-full", @status == :open && "bg-success", @status in [:reserved, :confirmed] && "bg-warning"]}></span>
       {if @status == :open, do: "Available", else: "Reserved"}
     </span>
     """

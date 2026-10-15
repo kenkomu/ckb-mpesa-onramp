@@ -460,6 +460,30 @@ export async function clearReservation(offer) {
 }
 
 /**
+ * Seller confirms they received the KES. Turns the reservation into a
+ * "confirmed" one (same data + 0x01); the contract only lets the seller
+ * (their lock must be an input) do this, and only a confirmed offer can be
+ * claimed by the buyer.
+ */
+export async function confirmReceipt(offer) {
+  const { signer, config } = await getSigner();
+  const escrowLock = scriptFrom(config.mpesa_escrow.code_hash, config.mpesa_escrow.hash_type, escrowArgsFromOffer(offer));
+  const guardScript = scriptFrom(config.offer_guard.code_hash, config.offer_guard.hash_type, guardArgsFromOffer(offer));
+
+  const tx = ccc.Transaction.from({
+    inputs: [{ previousOutput: outPointFrom(offer.out_point) }],
+    outputs: [{ capacity: offer.capacity_shannon, lock: escrowLock, type: guardScript }],
+    outputsData: [concatHex(offer.reserved_by_lock_hash, amountToLeHex8(offer.reserved_until), "0x01")],
+    witnesses: ["0x"],
+  });
+  tx.addCellDeps(sighashCellDep(config), contractCellDep(config.mpesa_escrow), contractCellDep(config.offer_guard));
+
+  await tx.completeFeeBy(signer, FEE_RATE);
+  const signed = await signer.signOnlyTransaction(tx);
+  return submit(signed, config);
+}
+
+/**
  * Seller takes their CKB back once the offer's deadline has passed (and
  * any reservation has expired). The seller's own wallet input is what
  * the contract checks against `seller_lock_hash`.

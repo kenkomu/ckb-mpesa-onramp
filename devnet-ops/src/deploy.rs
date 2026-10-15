@@ -20,11 +20,17 @@ fn main() {
     let lock = sighash_lock(&blake160);
 
     let build_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../contract/build/release");
-    let binaries = [
-        ("claims-registry", fs::read(build_dir.join("claims-registry")).expect("read claims-registry binary")),
-        ("mpesa-escrow", fs::read(build_dir.join("mpesa-escrow")).expect("read mpesa-escrow binary")),
-        ("offer-guard", fs::read(build_dir.join("offer-guard")).expect("read offer-guard binary")),
-    ];
+    // DEPLOY_ONLY=mpesa-escrow redeploys just the named binaries (comma
+    // separated) -- e.g. after an escrow-only contract change -- and writes
+    // deployed_<names>_v2.json instead of overwriting deployed.json.
+    let only: Option<Vec<String>> = std::env::var("DEPLOY_ONLY")
+        .ok()
+        .map(|v| v.split(',').map(|n| n.trim().to_string()).collect());
+    let binaries: Vec<(&str, Vec<u8>)> = ["claims-registry", "mpesa-escrow", "offer-guard"]
+        .into_iter()
+        .filter(|name| only.as_ref().map_or(true, |o| o.iter().any(|n| n == name)))
+        .map(|name| (name, fs::read(build_dir.join(name)).unwrap_or_else(|_| panic!("read {name} binary"))))
+        .collect();
 
     // Exact minimum occupied capacity per binary's own data cell.
     let mut output_capacities = Vec::new();
@@ -84,14 +90,15 @@ fn main() {
     wait_for_tx(&tx_hash, 60);
     println!("Committed.");
 
-    let result: Value = json!({
-        "tx_hash": tx_hash,
-        "claims_registry_index": 0,
-        "mpesa_escrow_index": 1,
-        "offer_guard_index": 2,
-        "change_index": 3,
-    });
-    let out_path = devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join("deployed.json");
+    let mut result = json!({ "tx_hash": tx_hash, "change_index": binaries.len() });
+    for (i, (name, _)) in binaries.iter().enumerate() {
+        result[format!("{}_index", name.replace('-', "_"))] = json!(i);
+    }
+    let file_name = match &only {
+        Some(names) => format!("deployed_{}_v2.json", names.join("_")),
+        None => "deployed.json".to_string(),
+    };
+    let out_path = devnet_ops::data_dir(env!("CARGO_MANIFEST_DIR")).join(file_name);
     fs::write(&out_path, serde_json::to_string_pretty(&result).unwrap()).unwrap();
     println!("Wrote {}", out_path.display());
 }
