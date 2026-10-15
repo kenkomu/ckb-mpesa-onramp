@@ -24,7 +24,7 @@ defmodule Web.Ckb.Faucet do
   require Logger
 
   @cooldown_seconds 24 * 60 * 60
-  @amount_ckb "300"
+  @amount_ckb "600"
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)

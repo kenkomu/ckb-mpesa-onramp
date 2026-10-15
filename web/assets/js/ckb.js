@@ -360,7 +360,7 @@ export async function createOffer(recipientHashHex, amountMinorUnits) {
   // real reserveOffer failure, not anticipated up front).
   const escrowCellForSizing = ccc.CellOutput.from({ lock: escrowLock, type: guardScript });
   const escrowMinCapacity = BigInt(escrowCellForSizing.occupiedSize) * 100_000_000n; // occupiedSize is in bytes, capacity in shannon
-  const escrowHeadroom = 1_000n * 100_000_000n; // 1000 CKB, matching devnet-ops's own convention
+  const escrowHeadroom = 100n * 100_000_000n; // 100 CKB: RESERVE only needs ~32 CKB + fee; 1000 made selling impossible on a 300 CKB faucet
   const escrowCapacity = escrowMinCapacity + escrowHeadroom;
 
   const tx = ccc.Transaction.from({

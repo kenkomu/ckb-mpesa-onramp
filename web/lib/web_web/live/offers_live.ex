@@ -132,7 +132,7 @@ defmodule WebWeb.OffersLive do
       case result do
         {:ok, tx_hash} ->
           socket
-          |> assign(faucet_busy: false, faucet_notice: "Sent 300 testnet CKB: #{tx_hash}")
+          |> assign(faucet_busy: false, faucet_notice: "Sent 600 testnet CKB: #{tx_hash}")
           |> push_event("refresh_wallet", %{})
 
         {:error, :cooldown, seconds_remaining} ->
@@ -327,10 +327,11 @@ defmodule WebWeb.OffersLive do
           </div>
         </div>
 
-        <% listed = buy_list(@offers, @directory, @wallet) %>
+        <% listed = Enum.filter(buy_list(@offers, @directory, @wallet), &(&1.status == :open))
+        taken = Enum.filter(buy_list(@offers, @directory, @wallet), &(&1.status == :reserved)) %>
         <div :if={@error == nil and listed == [] and mine_reserved(@offers, @wallet) == []} class="flex flex-col items-center gap-2 text-center py-12">
           <.icon name="hero-inbox" class="size-8 text-base-content/30" />
-          <p class="text-base-content/60">No offers to buy right now. Check back soon, or sell some CKB yourself.</p>
+          <p class="text-base-content/60">No offers available right now. Check back soon, or sell some CKB yourself.</p>
         </div>
 
         <div :if={listed != []} class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -356,13 +357,17 @@ defmodule WebWeb.OffersLive do
                   <span :if={@busy == :reserve} class="loading loading-spinner loading-xs"></span>
                   {if @busy == :reserve, do: "Reserving...", else: "Reserve"}
                 </.button>
-                <div :if={offer.status == :reserved} class="text-xs text-base-content/50 w-full text-center py-1">
-                  Reserved by another buyer
-                </div>
               </div>
             </div>
           </div>
         </div>
+
+        <details :if={taken != []} class="text-sm">
+          <summary class="cursor-pointer text-base-content/60">{length(taken)} offers already reserved by other buyers</summary>
+          <ul class="mt-2 space-y-1 text-base-content/60 font-mono">
+            <li :for={offer <- taken}>{format_amount(offer.amount)} KES &middot; {format_capacity(offer.capacity_shannon)}</li>
+          </ul>
+        </details>
       </div>
 
       <%!-- ============ SELL ============ --%>
