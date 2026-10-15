@@ -18,15 +18,19 @@ defmodule WebWeb.OffersLive do
 
   use WebWeb, :live_view
 
-  alias Web.Ckb.Offers
+  alias Web.Ckb.{OfferDirectory, Offers, Phone}
 
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(wallet: nil, wallet_error: nil, busy: nil, notice: nil, tx_error: nil)
+     |> assign(tab: :buy, wallet: nil, wallet_error: nil, busy: nil, notice: nil, tx_error: nil)
      |> assign(faucet_busy: false, faucet_notice: nil, faucet_error: nil)
      |> assign(create_form: to_form(%{"identifier" => "", "amount" => ""}))
      |> load_offers()}
+  end
+
+  def handle_event("set_tab", %{"tab" => tab}, socket) when tab in ["buy", "sell"] do
+    {:noreply, assign(socket, tab: String.to_existing_atom(tab))}
   end
 
   def handle_event("refresh", _params, socket) do
@@ -67,12 +71,19 @@ defmodule WebWeb.OffersLive do
   def handle_event("create_offer", %{"identifier" => identifier, "amount" => amount_kes}, socket) do
     with {:ok, identifier} <- Offers.validate_identifier(identifier),
          {:ok, minor_units} <- Offers.parse_kes(amount_kes) do
+      OfferDirectory.register(OfferDirectory.hash(identifier), identifier, socket.assigns.wallet && socket.assigns.wallet.lock_hash)
+
       {:noreply,
        socket
        |> assign(busy: :create, notice: nil, tx_error: nil)
        |> push_event("run_create_offer", %{identifier: identifier, amount: minor_units})}
     else
-      _ -> {:noreply, assign(socket, tx_error: "Enter an M-Pesa number (or any test value) and an amount in KES.")}
+      _ ->
+        {:noreply,
+         assign(socket,
+           tx_error:
+             "Enter a valid Kenyan M-Pesa number (like 0712 345 678 or +254 712 345 678) and an amount in KES."
+         )}
     end
   end
 
@@ -108,6 +119,7 @@ defmodule WebWeb.OffersLive do
     {:noreply,
      socket
      |> assign(busy: nil, notice: "#{action_label(action)} submitted: #{tx_hash}", tx_error: nil)
+     |> assign(tab: if(action == "create", do: :sell, else: :buy))
      |> load_offers()}
   end
 
@@ -145,8 +157,37 @@ defmodule WebWeb.OffersLive do
 
   defp load_offers(socket) do
     case Offers.list() do
-      {:ok, offers} -> assign(socket, offers: offers, error: nil)
-      {:error, reason} -> assign(socket, offers: [], error: reason)
+      {:ok, offers} -> assign(socket, offers: offers, directory: directory_for(offers), error: nil)
+      {:error, reason} -> assign(socket, offers: [], directory: %{}, error: reason)
+    end
+  end
+
+  defp directory_for(offers) do
+    Map.new(offers, fn offer -> {offer.recipient_hash, OfferDirectory.lookup(offer.recipient_hash)} end)
+  end
+
+  defp mine_reserved(offers, nil), do: Enum.reject(offers, fn _ -> true end)
+
+  defp mine_reserved(offers, wallet),
+    do: Enum.filter(offers, &(&1.status == :reserved and &1.reserved_by_lock_hash == wallet.lock_hash))
+
+  defp my_sales(_offers, _directory, nil), do: []
+
+  defp my_sales(offers, directory, wallet) do
+    Enum.filter(offers, fn o ->
+      match?(%{seller_lock_hash: lh} when lh == wallet.lock_hash, directory[o.recipient_hash])
+    end)
+  end
+
+  defp buy_list(offers, directory, wallet) do
+    mine = my_sales(offers, directory, wallet) ++ mine_reserved(offers, wallet)
+    Enum.reject(offers, &(&1 in mine))
+  end
+
+  defp seller_number(directory, offer) do
+    case directory[offer.recipient_hash] do
+      %{number: number} -> Phone.display(number)
+      _ -> nil
     end
   end
 
@@ -232,137 +273,147 @@ defmodule WebWeb.OffersLive do
         <span class="text-sm">Could not reach the CKB node: {inspect(@error)}</span>
       </div>
 
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div class="card bg-base-200 border border-base-300 shadow-sm">
-          <div class="card-body gap-1.5">
-            <div class="flex items-center gap-2">
-              <span class="flex size-7 items-center justify-center rounded-full bg-primary/15 text-primary font-mono text-xs font-bold">1</span>
-              <.icon name="hero-lock-closed" class="size-4 text-primary" />
-            </div>
-            <h3 class="font-display font-semibold">Sellers lock CKB</h3>
-            <p class="text-sm text-base-content/70">Escrow on-chain and name the KES price &mdash; that's the form below.</p>
-          </div>
-        </div>
-        <div class="card bg-base-200 border border-base-300 shadow-sm">
-          <div class="card-body gap-1.5">
-            <div class="flex items-center gap-2">
-              <span class="flex size-7 items-center justify-center rounded-full bg-primary/15 text-primary font-mono text-xs font-bold">2</span>
-              <.icon name="hero-hand-raised" class="size-4 text-primary" />
-            </div>
-            <h3 class="font-display font-semibold">Buyers reserve</h3>
-            <p class="text-sm text-base-content/70">
-              Click <span class="font-mono">Reserve</span> for first dibs, then send KES via M-Pesa off-chain.
-            </p>
-          </div>
-        </div>
-        <div class="card bg-base-200 border border-base-300 shadow-sm">
-          <div class="card-body gap-1.5">
-            <div class="flex items-center gap-2">
-              <span class="flex size-7 items-center justify-center rounded-full bg-primary/15 text-primary font-mono text-xs font-bold">3</span>
-              <.icon name="hero-check-badge" class="size-4 text-primary" />
-            </div>
-            <h3 class="font-display font-semibold">Buyer claims</h3>
-            <p class="text-sm text-base-content/70">
-              Click <span class="font-mono">Claim</span> and the contract releases CKB straight to their wallet.
-            </p>
-          </div>
-        </div>
+      <div role="tablist" class="tabs tabs-boxed w-fit">
+        <button role="tab" phx-click="set_tab" phx-value-tab="buy" class={["tab", @tab == :buy && "tab-active"]}>
+          Buy CKB
+        </button>
+        <button role="tab" phx-click="set_tab" phx-value-tab="sell" class={["tab", @tab == :sell && "tab-active"]}>
+          Sell CKB
+        </button>
       </div>
 
-      <div class="card bg-base-200 border border-base-300 shadow-sm">
-        <div class="card-body">
-          <h2 class="font-display text-lg font-semibold">Sell CKB for KES</h2>
-          <.form :if={@wallet} for={@create_form} phx-submit="create_offer" class="flex flex-wrap items-end gap-3 mt-1">
-            <label class="flex-1 min-w-56 form-control">
-              <span class="label-text text-xs text-base-content/60 mb-1">M-Pesa number (any test value works)</span>
-              <input
-                type="text"
-                name="identifier"
-                class="input input-bordered input-sm w-full"
-                placeholder="0712 345 678"
-              />
-            </label>
-            <label class="form-control">
-              <span class="label-text text-xs text-base-content/60 mb-1">Amount (KES)</span>
-              <input type="text" name="amount" class="input input-bordered input-sm w-32" placeholder="250" />
-            </label>
-            <.button type="submit" disabled={@busy == :create} phx-disable-with="Creating..." class="btn-primary">
-              <span :if={@busy == :create} class="loading loading-spinner loading-xs"></span>
-              {if @busy == :create, do: "Creating...", else: "Create offer"}
+      <%!-- ============ BUY ============ --%>
+      <div :if={@tab == :buy} class="space-y-6">
+        <p class="text-sm text-base-content/70 max-w-xl">
+          Pay a seller in KES via M-Pesa and receive their CKB. <strong>1.</strong> Reserve an offer.
+          <strong>2.</strong> Send the exact KES amount to the seller's number. <strong>3.</strong> Come back and claim your CKB.
+        </p>
+
+        <div :for={offer <- mine_reserved(@offers, @wallet)} class="card bg-primary/5 border-2 border-primary/40 shadow-sm">
+          <div class="card-body gap-3">
+            <div class="font-display font-semibold">Your reservation &mdash; pay now</div>
+            <div :if={seller_number(@directory, offer)} class="space-y-1">
+              <div class="text-sm text-base-content/70">Send exactly</div>
+              <div class="font-mono text-3xl font-bold tabular-nums">
+                {format_amount(offer.amount)} <span class="text-base font-normal">KES</span>
+              </div>
+              <div class="text-sm text-base-content/70">via M-Pesa to</div>
+              <button
+                type="button"
+                class="font-mono text-2xl font-bold underline decoration-dotted cursor-pointer"
+                title="Tap to copy"
+                onclick={"navigator.clipboard.writeText('#{seller_number(@directory, offer)}'.replaceAll(' ',''))"}
+              >
+                {seller_number(@directory, offer)}
+              </button>
+            </div>
+            <div :if={!seller_number(@directory, offer)} class="text-sm text-warning">
+              The seller's number isn't available for this older offer. Please reserve a newer one.
+            </div>
+            <p class="text-xs text-base-content/60">
+              Only tap Claim after you've sent the money. You'll receive {format_capacity(offer.capacity_shannon)}.
+            </p>
+            <.button
+              phx-click="claim_offer"
+              phx-value-tx_hash={offer.out_point["tx_hash"]}
+              phx-value-index={offer.out_point["index"]}
+              disabled={@busy == :claim}
+              phx-disable-with="Claiming..."
+              class="btn-primary w-full"
+            >
+              <span :if={@busy == :claim} class="loading loading-spinner loading-xs"></span>
+              {if @busy == :claim, do: "Claiming...", else: "I've paid -- Claim my CKB"}
             </.button>
-          </.form>
-          <p :if={@wallet == nil} class="text-sm text-base-content/60 mt-1">Connect a wallet to create an offer.</p>
+          </div>
+        </div>
+
+        <% listed = buy_list(@offers, @directory, @wallet) %>
+        <div :if={@error == nil and listed == [] and mine_reserved(@offers, @wallet) == []} class="flex flex-col items-center gap-2 text-center py-12">
+          <.icon name="hero-inbox" class="size-8 text-base-content/30" />
+          <p class="text-base-content/60">No offers to buy right now. Check back soon, or sell some CKB yourself.</p>
+        </div>
+
+        <div :if={listed != []} class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div :for={offer <- listed} class="card bg-base-200 border border-base-300 shadow-sm">
+            <div class="card-body gap-2">
+              <.status_badge status={offer.status} />
+              <div class="font-mono text-2xl font-bold tabular-nums">
+                {format_amount(offer.amount)} <span class="text-sm font-normal text-base-content/60">KES</span>
+              </div>
+              <div class="text-sm text-base-content/70 font-mono tabular-nums">
+                You get {format_capacity(offer.capacity_shannon)}
+              </div>
+              <div class="card-actions mt-2">
+                <.button
+                  :if={@wallet && offer.status == :open}
+                  phx-click="reserve_offer"
+                  phx-value-tx_hash={offer.out_point["tx_hash"]}
+                  phx-value-index={offer.out_point["index"]}
+                  disabled={@busy == :reserve}
+                  phx-disable-with="Reserving..."
+                  class="btn-primary btn-sm w-full"
+                >
+                  <span :if={@busy == :reserve} class="loading loading-spinner loading-xs"></span>
+                  {if @busy == :reserve, do: "Reserving...", else: "Reserve"}
+                </.button>
+                <div :if={offer.status == :reserved} class="text-xs text-base-content/50 w-full text-center py-1">
+                  Reserved by another buyer
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div :if={@error == nil and @offers == []} class="flex flex-col items-center gap-2 text-center py-16">
-        <.icon name="hero-inbox" class="size-8 text-base-content/30" />
-        <p class="text-base-content/60">No open offers right now &mdash; create one above.</p>
-      </div>
-
-      <div :if={@offers != []} class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div
-          :for={offer <- @offers}
-          class="motion-safe:animate-fade-slide-up card bg-base-200 border border-base-300 shadow-sm transition-all duration-200 hover:shadow-md hover:border-primary/40 hover:-translate-y-0.5"
-        >
-          <div class="card-body gap-2">
-            <div class="flex items-center justify-between">
-              <span class={[
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-mono font-semibold",
-                offer.status == :open && "bg-success/15 text-success",
-                offer.status == :reserved && "bg-warning/15 text-warning"
-              ]}>
-                <span class={[
-                  "size-1.5 rounded-full",
-                  offer.status == :open && "bg-success",
-                  offer.status == :reserved && "bg-warning"
-                ]}>
-                </span>
-                {offer.status}
-              </span>
-              <span class="text-xs text-base-content/50 font-mono">
-                {short_hash(offer.out_point["tx_hash"])}:{offer.out_point["index"]}
-              </span>
-            </div>
-
-            <div class="font-mono text-2xl font-bold tabular-nums">
-              {format_amount(offer.amount)} <span class="text-sm font-normal text-base-content/60">KES</span>
-            </div>
-            <div class="text-sm text-base-content/70 font-mono tabular-nums">
-              {format_capacity(offer.capacity_shannon)} locked in escrow
-            </div>
-            <div class="text-xs text-base-content/50 font-mono">Recipient: {short_hash(offer.recipient_hash)}</div>
-
-            <div class="card-actions mt-2">
-              <.button
-                :if={@wallet && offer.status == :open}
-                phx-click="reserve_offer"
-                phx-value-tx_hash={offer.out_point["tx_hash"]}
-                phx-value-index={offer.out_point["index"]}
-                disabled={@busy == :reserve}
-                phx-disable-with="Reserving..."
-                class="btn-primary btn-sm w-full"
-              >
-                <span :if={@busy == :reserve} class="loading loading-spinner loading-xs"></span>
-                {if @busy == :reserve, do: "Reserving...", else: "Reserve"}
+      <%!-- ============ SELL ============ --%>
+      <div :if={@tab == :sell} class="space-y-6">
+        <div class="card bg-base-200 border border-base-300 shadow-sm">
+          <div class="card-body">
+            <h2 class="font-display text-lg font-semibold">Sell CKB for KES</h2>
+            <p class="text-sm text-base-content/70">
+              Lock some CKB and set a KES price. A buyer reserves it, sends you the KES on M-Pesa, then claims the CKB.
+            </p>
+            <.form :if={@wallet} for={@create_form} phx-submit="create_offer" class="flex flex-wrap items-end gap-3 mt-1">
+              <label class="flex-1 min-w-56 form-control">
+                <span class="label-text text-xs text-base-content/60 mb-1">Your M-Pesa number (the buyer pays this)</span>
+                <input
+                  type="tel"
+                  name="identifier"
+                  required
+                  class="input input-bordered input-sm w-full"
+                  placeholder="0712 345 678"
+                />
+              </label>
+              <label class="form-control">
+                <span class="label-text text-xs text-base-content/60 mb-1">Price (KES)</span>
+                <input type="text" inputmode="decimal" name="amount" required class="input input-bordered input-sm w-32" placeholder="250" />
+              </label>
+              <.button type="submit" disabled={@busy == :create} phx-disable-with="Creating..." class="btn-primary">
+                <span :if={@busy == :create} class="loading loading-spinner loading-xs"></span>
+                {if @busy == :create, do: "Creating...", else: "Create offer"}
               </.button>
-              <.button
-                :if={@wallet && offer.status == :reserved && offer.reserved_by_lock_hash == @wallet.lock_hash}
-                phx-click="claim_offer"
-                phx-value-tx_hash={offer.out_point["tx_hash"]}
-                phx-value-index={offer.out_point["index"]}
-                disabled={@busy == :claim}
-                phx-disable-with="Claiming..."
-                class="btn-primary btn-sm w-full"
-              >
-                <span :if={@busy == :claim} class="loading loading-spinner loading-xs"></span>
-                {if @busy == :claim, do: "Claiming...", else: "Claim"}
-              </.button>
-              <div
-                :if={offer.status == :reserved && (@wallet == nil || offer.reserved_by_lock_hash != @wallet.lock_hash)}
-                class="text-xs text-base-content/50 w-full text-center py-1"
-              >
-                Reserved by another buyer
+            </.form>
+            <p :if={@wallet == nil} class="text-sm text-base-content/60 mt-1">Connect a wallet to create an offer.</p>
+          </div>
+        </div>
+
+        <% sales = my_sales(@offers, @directory, @wallet) %>
+        <div>
+          <h3 class="font-display font-semibold mb-3">My offers</h3>
+          <p :if={sales == []} class="text-sm text-base-content/60">You haven't listed anything yet.</p>
+          <div :if={sales != []} class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div :for={offer <- sales} class="card bg-base-200 border border-base-300 shadow-sm">
+              <div class="card-body gap-2">
+                <.status_badge status={offer.status} />
+                <div class="font-mono text-2xl font-bold tabular-nums">
+                  {format_amount(offer.amount)} <span class="text-sm font-normal text-base-content/60">KES</span>
+                </div>
+                <div class="text-sm text-base-content/70 font-mono">{format_capacity(offer.capacity_shannon)} in escrow</div>
+                <div class="text-xs text-base-content/60">
+                  {if offer.status == :open,
+                    do: "Waiting for a buyer.",
+                    else: "A buyer reserved this. Expect #{format_amount(offer.amount)} KES on your M-Pesa."}
+                </div>
               </div>
             </div>
           </div>
@@ -376,6 +427,21 @@ defmodule WebWeb.OffersLive do
       </div>
     </div>
     </Layouts.app>
+    """
+  end
+
+  attr :status, :atom, required: true
+
+  defp status_badge(assigns) do
+    ~H"""
+    <span class={[
+      "inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold",
+      @status == :open && "bg-success/15 text-success",
+      @status == :reserved && "bg-warning/15 text-warning"
+    ]}>
+      <span class={["size-1.5 rounded-full", @status == :open && "bg-success", @status == :reserved && "bg-warning"]}></span>
+      {if @status == :open, do: "Available", else: "Reserved"}
+    </span>
     """
   end
 

@@ -64,11 +64,13 @@ defmodule WebWeb.MobileActionLive do
       %{"action" => "create", "identifier" => identifier, "amount" => amount_kes} ->
         with {:ok, identifier} <- Offers.validate_identifier(identifier),
              {:ok, minor_units} <- Offers.parse_kes(amount_kes) do
+          Web.Ckb.OfferDirectory.register(Web.Ckb.OfferDirectory.hash(identifier), identifier)
+
           socket
           |> assign(status: :running)
           |> push_event("run_create_offer", %{identifier: identifier, amount: minor_units})
         else
-          _ -> assign(socket, status: :error, error: "Invalid create-offer parameters.")
+          _ -> assign(socket, status: :error, error: "Enter a valid Kenyan M-Pesa number (e.g. 0712 345 678) and an amount.")
         end
 
       %{"action" => "reserve", "tx_hash" => tx_hash, "index" => index} ->

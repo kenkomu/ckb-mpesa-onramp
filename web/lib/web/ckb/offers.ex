@@ -60,17 +60,11 @@ defmodule Web.Ckb.Offers do
   @min_open_capacity_shannon (8 + 32 + 1 + @args_len + 32 + 1 + @guard_args_len) * 100_000_000
 
   @doc """
-  Turns a human-entered M-Pesa number (or, for this pilot, any test
-  value) into a non-empty trimmed identifier ready to hand to ckb.js's
-  hashIdentifier -- shared between the web create-offer form and the
-  mobile app's own create action.
+  Validates a Kenyan mobile number and returns it normalized
+  ("254712345678"), ready to hash with ckb.js's hashIdentifier. Shared
+  between the web create-offer form and the mobile app's create action.
   """
-  def validate_identifier(identifier) do
-    case String.trim(identifier) do
-      "" -> :error
-      trimmed -> {:ok, trimmed}
-    end
-  end
+  def validate_identifier(identifier), do: Web.Ckb.Phone.normalize(identifier)
 
   @doc """
   Parses a plain KES amount ("250" or "250.50") into the minor-unit

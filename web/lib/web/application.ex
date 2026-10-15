@@ -12,6 +12,7 @@ defmodule Web.Application do
       {DNSCluster, query: Application.get_env(:web, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Web.PubSub},
       Web.Feedback.Store,
+      Web.Ckb.OfferDirectory,
       Web.Ckb.Faucet,
       # Start to serve requests, typically the last entry
       WebWeb.Endpoint
