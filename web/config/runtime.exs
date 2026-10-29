@@ -30,16 +30,18 @@ config :web, WebWeb.Endpoint, http: [port: String.to_integer(System.get_env("POR
 # code_hash is purely a function of the binary bytes), only the
 # cell_dep outpoints and the registry's own Type ID identity differ,
 # since those are tied to which chain actually holds the deploying
-# transactions.
+# transactions. Exception: mpesa-escrow is v2 here (reservation expiry,
+# seller confirm; deployed_mpesa-escrow_v2.json), while dev.exs still
+# points at the v1 binary until the local devnet is redeployed.
 if System.get_env("CKB_NETWORK") == "testnet" do
   config :web, :ckb,
     rpc_url: "https://testnet.ckb.dev/",
     sighash_code_hash: "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8",
     sighash_dep_group: %{tx_hash: "0xf8de3bb47d055cdf460d93a2a6e1b05f7432f9777c8c474abf4eec1d4aee5d37", index: 0},
     mpesa_escrow: %{
-      code_hash: "0x74e8b52b2043efe2386a5f838a0a0ce44d0d087025e95a575eb40ba38b54e0f9",
+      code_hash: "0x0389a5f0b48e27d5c1b12ca700440c0b2eff2d94c4e8f824ed55cb4e9a3b09ae",
       hash_type: "data1",
-      cell_dep: %{tx_hash: "0xa5a85f5cc3a1977d8e244e01681312a7c62d7a9b4c09eafa8d207a81a75083c2", index: 1}
+      cell_dep: %{tx_hash: "0x3fa7b70b7dd6b77f836d851cee3b82464ca662702cc28548695849d99837ec9a", index: 0}
     },
     claims_registry: %{
       code_hash: "0x5cfd31a4a0775052dd45b85637cabd9086b5f7f5d257227153b583d72f3c1000",

@@ -5,24 +5,37 @@
 // duplicated, not imported, same reasoning as ckb.js's own byte-layout
 // comment: this is a second, independent read of the same wire format.
 
+// mpesa-escrow (contract/contracts/mpesa-escrow/src/main.rs). Codes 18-24
+// only exist from v2 on; v1 offers still on-chain never return them, so one
+// table serves both deployed binaries.
+const ESCROW_ERRORS = {
+  4: "This offer's on-chain data is malformed.",
+  5: "The claim is missing its signature.",
+  6: "The claim signature is the wrong length.",
+  7: "The claim signature is malformed.",
+  8: "Could not recover a signer from the claim signature.",
+  9: "The claim wasn't signed by the trusted verifier.",
+  10: "The claim's recipient doesn't match this offer.",
+  11: "The claim's amount doesn't match this offer.",
+  12: "This offer's payment registry no longer exists, so it can never be claimed (a leftover test offer -- it should no longer appear in the list; try refreshing).",
+  13: "The registry update in this transaction doesn't match the claim.",
+  14: "This offer is missing its reservation data.",
+  15: "Unsupported transaction shape for this offer.",
+  16: "This offer was reserved by a different wallet.",
+  17: "This offer is missing its ownership badge.",
+  18: "This transaction is missing a valid time lock.",
+  19: "This offer has passed its deadline and can no longer be reserved.",
+  20: "The reservation window is invalid (it must be exactly 20 minutes).",
+  21: "This action can't change the offer's CKB amount or type.",
+  22: "Too early: the reservation or the offer's deadline hasn't passed yet.",
+  23: "Only the seller's wallet can do this.",
+  24: "The seller hasn't confirmed receiving your M-Pesa payment yet.",
+};
+
 const CONTRACT_ERRORS = {
-  // mpesa-escrow (contract/contracts/mpesa-escrow/src/main.rs)
-  "0x74e8b52b2043efe2386a5f838a0a0ce44d0d087025e95a575eb40ba38b54e0f9": {
-    4: "This offer's on-chain data is malformed.",
-    5: "The claim is missing its signature.",
-    6: "The claim signature is the wrong length.",
-    7: "The claim signature is malformed.",
-    8: "Could not recover a signer from the claim signature.",
-    9: "The claim wasn't signed by the trusted verifier.",
-    10: "The claim's recipient doesn't match this offer.",
-    11: "The claim's amount doesn't match this offer.",
-    12: "This offer's payment registry no longer exists, so it can never be claimed (a leftover test offer -- it should no longer appear in the list; try refreshing).",
-    13: "The registry update in this transaction doesn't match the claim.",
-    14: "This offer is missing its reservation data.",
-    15: "Unsupported transaction shape for this offer.",
-    16: "This offer was reserved by a different wallet.",
-    17: "This offer is missing its ownership badge.",
-  },
+  // mpesa-escrow v1 (Sep 16 testnet deploy) and v2 (reservation expiry, seller confirm)
+  "0x74e8b52b2043efe2386a5f838a0a0ce44d0d087025e95a575eb40ba38b54e0f9": ESCROW_ERRORS,
+  "0x0389a5f0b48e27d5c1b12ca700440c0b2eff2d94c4e8f824ed55cb4e9a3b09ae": ESCROW_ERRORS,
   // offer-guard (contract/contracts/offer-guard/src/main.rs)
   "0x13c3c2b25bda33139e4d0ba52868b478d98d47c166d979e18898a3b8cfa786ba": {
     4: "This offer's ownership badge is malformed.",
